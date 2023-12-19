@@ -70,7 +70,8 @@ class Net(nn.Module):
 
         # Anchor-based Contrastive Learning
         x_new = self.linear_vs(i_new)
-        y_new = self.linear_ts(y_['flat_lang_feat'].unsqueeze(1))
+        y_new = self.linear_ts(y_['lang_feat']) #change to word embedding
+        
         if self.training:
             loss = self.head(x_new, y_new)
             return loss
@@ -86,7 +87,10 @@ def get_boxes(boxes_sml, predictionslist,class_num):
     pred = []
     for i in range(len(predictionslist)):
         mask = predictionslist[i].squeeze(1)
-        masked_pred = boxes_sml[i][mask]
+        # Align boxes_sml[i] with the mask
+        aligned_boxes = boxes_sml[i][:, :mask.size(1), :, :]  # Shape: [batchsize, 15, num_anchors, box_features]
+
+        masked_pred = aligned_boxes[mask]
         refined_pred = masked_pred.view(batchsize, -1, class_num+5)
         refined_pred[:, :, 0] = refined_pred[:, :, 0] - refined_pred[:, :, 2] / 2
         refined_pred[:, :, 1] = refined_pred[:, :, 1] - refined_pred[:, :, 3] / 2
