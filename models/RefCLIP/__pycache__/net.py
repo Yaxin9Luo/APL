@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from models.language_encoder import language_encoder
-from models.visual_encoder import visual_encoder , process_yolov3_output
+from models.visual_encoder import visual_encoder , id_to_name, process_yolov3_output
 from models.RefCLIP.head import WeakREChead
 from models.network_blocks import MultiScaleFusion
 
@@ -41,7 +41,12 @@ class Net(nn.Module):
         # Vision and Language Encoding
         with torch.no_grad():
             boxes_all, x_, boxes_sml = self.visual_encoder(x)
+            
+        # Process YOLOv3 output to get class names
+        predicted_class_names = process_yolov3_output(boxes_all)
         
+        # Get the tag language embeddings
+        tag = self.lang_encoder(predicted_class_names)
         
         y_ = self.lang_encoder(y)
 
@@ -62,10 +67,7 @@ class Net(nn.Module):
             torch.zeros(bs, gridnum).to(boxes_sml[0].device).scatter(1, indices, 1).bool().unsqueeze(2).unsqueeze(
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new)
-        ##
-        class_indices = process_yolov3_output(boxes_all)
-        tag = self.lang_encoder(class_indices)
-            
+
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
         bs, gridnum, ch = i_new.shape
@@ -76,7 +78,7 @@ class Net(nn.Module):
         # Anchor-based Contrastive Learning
         x_new = self.linear_vs(i_new)
         y_new = self.linear_ts(y_['lang_feat']) #change to word embedding
-        tag_new = self.linear_ts(tag['lang_feat']) # get the tag feature
+        tag_new = self.linear_ts(tag) # get the tag feature
         if self.training:
             loss = self.head(x_new, y_new,tag_new) # add tag-text CL
             return loss

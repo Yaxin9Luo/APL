@@ -2,8 +2,8 @@
 
 import os
 import cv2
-import json, re, en_vectors_web_lg, random
-
+import json, re, random
+import spacy
 import numpy as np
 
 import torch
@@ -21,6 +21,9 @@ class RefCOCODataSet(Data.Dataset):
         super(RefCOCODataSet, self).__init__()
         self.__C = __C
         self.split=split
+        #load coco categories from the JSON file
+        with open('/root/autodl-tmp/Improve_RefCLIP/data/anns/cat_name.json', 'r') as f:
+            self.categories = json.load(f)
         assert  __C.DATASET in ['refcoco', 'refcoco+', 'refcocog','referit']
         # --------------------------
         # ---- Raw data loading ---
@@ -79,7 +82,7 @@ class RefCOCODataSet(Data.Dataset):
         spacy_tool = None
         pretrained_emb = []
         if use_glove:
-            spacy_tool = en_vectors_web_lg.load()
+            spacy_tool = spacy.load('en_core_web_lg')
             pretrained_emb.append(spacy_tool('PAD').vector)
             pretrained_emb.append(spacy_tool('UNK').vector)
             pretrained_emb.append(spacy_tool('CLS').vector)

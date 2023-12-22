@@ -4,8 +4,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from models.network_blocks import add_conv,DropBlock,FeatureAdaption,resblock,SPPLayer,upsample
+import json
 
-
+with open('/root/autodl-tmp/Improve_RefCLIP/data/anns/cat_name.json', 'r') as f:
+    class_names = json.load(f)
 class YOLOv3Head(nn.Module):
     def __init__(self, anch_mask, n_classes, stride, in_ch=1024, ignore_thre=0.7, label_smooth = False, rfb=False, sep=False):
         super(YOLOv3Head, self).__init__()
@@ -209,4 +211,26 @@ backbone_dict={
 def visual_encoder(__C):
     vis_enc=backbone_dict[__C.VIS_ENC](num_classes=__C.CLASS_NUM)
     return vis_enc
+
+
+
+
+def process_yolov3_output(yolov3_output, topk=15):
+    # Get only the class probabilities part of the output
+    print(yolov3_output)
+    print(yolov3_output.shape)
+
+    class_probs = yolov3_output[..., 5:]  # Shape: [batchsize, n_anchors, fsize, fsize, n_classes]
+    
+    # Compute the maximum class probabilities for each anchor
+    max_probs, _ = torch.max(class_probs, dim=-1)  # Shape: [batchsize, n_anchors, fsize, fsize]
+
+    # Select the topk anchors for each image in the batch
+    topk_probs, topk_indices = torch.topk(max_probs, topk, dim=-1)
+
+    # Gather the class indices for the topk anchors
+    topk_class_indices = torch.gather(class_probs, 1, topk_indices.unsqueeze(-1).expand(-1, -1, class_probs.size(-1))).argmax(dim=-1)
+
+    return topk_class_indices
+
 

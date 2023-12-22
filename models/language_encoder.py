@@ -43,6 +43,8 @@ class LSTM_SA(nn.Module):
     def forward(self, ques_ix):
 
         # Pre-process Language Feature
+        print(ques_ix)
+        print(ques_ix.shape)
         lang_feat_mask = make_mask(ques_ix.unsqueeze(2))
         lang_feat = self.embedding(ques_ix)
         lang_feat, _ = self.lstm(lang_feat)
