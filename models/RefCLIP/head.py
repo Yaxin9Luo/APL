@@ -39,7 +39,16 @@ def getContrast(vis_emb, lan_emb,tag_emb):
 
 
     new_logits = torch.cat([max_sim_0,max_sim_1],dim=1)
-    new_logits_lt = torch.cat([max_sim_lt_0.unsqueeze(1), max_sim_lt_1], dim=1)
+    new_logits_lt = torch.cat([max_sim_lt_0, max_sim_lt_1], dim=1)
+    # print(new_logits)
+    # print(new_logits_lt)
+    # print("new_logits shape:", new_logits.shape)
+    # print("new_logits_lt:", new_logits_lt.shape)
+    # 填充零列，将其形状变为 [64, 127]
+    num_cols_to_add = 127 - new_logits_lt.shape[1]
+    if num_cols_to_add > 0:
+        zeros_to_add = torch.zeros(new_logits_lt.shape[0], num_cols_to_add, device='cuda:0')
+        new_logits_lt = torch.cat([new_logits_lt, zeros_to_add], dim=1)
     new_logits = (new_logits + new_logits_lt) / 2
 
     target = torch.eye(batchsize).to(vis_emb.device)
@@ -55,6 +64,10 @@ def getPrediction(vis_emb, lan_emb,tag_emb):
     sim_map,_=sim_map.topk(k=1, dim=1, largest=True, sorted=True)
     #select max score of text-tag
     sim_map_lt, _ = sim_map_lt.topk(k=1, dim=1, largest=True, sorted=True)
+    print(sim_map)
+    print(sim_map_lt)
+    print("sim_map shape:", sim_map.shape)
+    print("sim_map_lt shape:", sim_map_lt.shape)
     # Combine the similarities (e.g., averaging)
     sim_map = (sim_map + sim_map_lt) / 2
 
