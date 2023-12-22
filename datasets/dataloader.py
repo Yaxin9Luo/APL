@@ -21,9 +21,6 @@ class RefCOCODataSet(Data.Dataset):
         super(RefCOCODataSet, self).__init__()
         self.__C = __C
         self.split=split
-        #load coco categories from the JSON file
-        with open('/root/autodl-tmp/Improve_RefCLIP/data/anns/cat_name.json', 'r') as f:
-            self.categories = json.load(f)
         assert  __C.DATASET in ['refcoco', 'refcoco+', 'refcocog','referit']
         # --------------------------
         # ---- Raw data loading ---
@@ -86,7 +83,6 @@ class RefCOCODataSet(Data.Dataset):
             pretrained_emb.append(spacy_tool('PAD').vector)
             pretrained_emb.append(spacy_tool('UNK').vector)
             pretrained_emb.append(spacy_tool('CLS').vector)
-
         max_token = 0
         for split in stat_refs_list:
             for ann in stat_refs_list[split]:

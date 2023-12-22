@@ -5,9 +5,18 @@ import torch
 import torch.nn as nn
 from models.network_blocks import add_conv,DropBlock,FeatureAdaption,resblock,SPPLayer,upsample
 import json
+import spacy
 
+
+nlp = spacy.load('en_core_web_lg')
+
+#load coco categories from the JSON file
 with open('/root/autodl-tmp/Improve_RefCLIP/data/anns/cat_name.json', 'r') as f:
-    class_names = json.load(f)
+    categories = json.load(f)
+
+category_vectors = {cat: nlp(cat_name).vector for cat, cat_name in categories.items()}
+
+    
 class YOLOv3Head(nn.Module):
     def __init__(self, anch_mask, n_classes, stride, in_ch=1024, ignore_thre=0.7, label_smooth = False, rfb=False, sep=False):
         super(YOLOv3Head, self).__init__()
@@ -215,22 +224,19 @@ def visual_encoder(__C):
 
 
 
-def process_yolov3_output(yolov3_output, topk=15):
-    # Get only the class probabilities part of the output
-    print(yolov3_output)
-    print(yolov3_output.shape)
+def process_yolov3_output(yolov3_output, category_vectors,device="cuda:0"):
 
-    class_probs = yolov3_output[..., 5:]  # Shape: [batchsize, n_anchors, fsize, fsize, n_classes]
-    
-    # Compute the maximum class probabilities for each anchor
-    max_probs, _ = torch.max(class_probs, dim=-1)  # Shape: [batchsize, n_anchors, fsize, fsize]
+    # 获取类别概率部分
+    class_probs = yolov3_output[..., 5:]  # 类别概率位于最后的维度[64, 14196, 80]，[批次，锚点，类别]
 
-    # Select the topk anchors for each image in the batch
-    topk_probs, topk_indices = torch.topk(max_probs, topk, dim=-1)
+    # 计算每个锚点的最大类别概率
+    _, topk_class_indices = torch.max(class_probs, dim=-1)
+    # 展平 topk_class_indices 以便处理
+    topk_class_indices = topk_class_indices.view(-1)  # 转换为一维数组
 
-    # Gather the class indices for the topk anchors
-    topk_class_indices = torch.gather(class_probs, 1, topk_indices.unsqueeze(-1).expand(-1, -1, class_probs.size(-1))).argmax(dim=-1)
-
-    return topk_class_indices
-
+    # 将类别索引映射到词向量
+    word_vectors = [category_vectors[str(index.item())] for index in topk_class_indices]
+    # 将词向量列表转换为张量
+    word_vectors_tensor = torch.tensor(word_vectors).to(device)
+    return word_vectors_tensor
 

@@ -6,9 +6,10 @@ import torch.nn as nn
 def getContrast(vis_emb, lan_emb,tag_emb):
     sim_map = torch.einsum('avd, bqd -> baqv',vis_emb,lan_emb)
     # Compute similarities between text and tag embeddings
-    print("lan_emb", lan_emb.shape)
-    print("tag_emb", tag_emb.shape)
-    sim_map_lt = torch.einsum('avd, bqd -> baqv', lan_emb, tag_emb)
+    # print("lan_emb", lan_emb.shape) #lan_emb torch.Size([64, 15, 512])
+    # print("tag_emb", tag_emb.shape) #tag_emb torch.Size([908544, 512])
+
+    sim_map_lt = torch.einsum('bwd, td -> bwt', lan_emb, tag_emb)
     batchsize = sim_map.shape[0]
     #select the max score from word level
     sim_map,_=sim_map.topk(k=1, dim=2, largest=True, sorted=True)
@@ -32,7 +33,10 @@ def getContrast(vis_emb, lan_emb,tag_emb):
     # print("Mask shape:", (~torch.eye(batchsize).bool().to(max_sim_1.device)).shape)
 
     max_sim_1 = max_sim_1.masked_select(~torch.eye(batchsize).bool().to(max_sim_1.device)).contiguous().view(batchsize,batchsize-1)
-    max_sim_lt_1 = max_sim_lt_1.masked_select(~torch.eye(batchsize).bool().to(max_sim_lt_1.device)).contiguous().view(batchsize, batchsize - 1)
+    
+    mask_lt = ~torch.eye(sim_map.shape[2]).bool().to(sim_map.device)
+    max_sim_lt_1 = max_sim_lt_1.masked_select(mask_lt).contiguous().view(batchsize, -1)
+
 
     new_logits = torch.cat([max_sim_0,max_sim_1],dim=1)
     new_logits_lt = torch.cat([max_sim_lt_0.unsqueeze(1), max_sim_lt_1], dim=1)
@@ -46,7 +50,7 @@ def getContrast(vis_emb, lan_emb,tag_emb):
 def getPrediction(vis_emb, lan_emb,tag_emb):
     sim_map = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)
     # Compute similarities between visual and tag embeddings
-    sim_map_lt = torch.einsum('bkd, byd -> byk', lan_emb, tag_emb)
+    sim_map_lt = torch.einsum('bwd, td -> bwt', lan_emb, tag_emb)
     #select the max score from word level
     sim_map,_=sim_map.topk(k=1, dim=1, largest=True, sorted=True)
     #select max score of text-tag

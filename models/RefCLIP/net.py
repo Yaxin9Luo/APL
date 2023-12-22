@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from models.language_encoder import language_encoder
-from models.visual_encoder import visual_encoder , process_yolov3_output
+from models.visual_encoder import visual_encoder , process_yolov3_output,category_vectors
 from models.RefCLIP.head import WeakREChead
 from models.network_blocks import MultiScaleFusion
 
@@ -20,6 +20,7 @@ class Net(nn.Module):
 
         self.linear_vs = nn.Linear(1024, __C.HIDDEN_SIZE)
         self.linear_ts = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
+        self.adjust_dim = nn.Linear(300, 512)  # 新增一个线性层以调整维度
 
         self.head = WeakREChead(__C)
         self.multi_scale_manner = MultiScaleFusion(v_planes=(256, 512, 1024), hiden_planes=1024, scaled=True)
@@ -42,7 +43,6 @@ class Net(nn.Module):
         with torch.no_grad():
             boxes_all, x_, boxes_sml = self.visual_encoder(x)
         
-        
         y_ = self.lang_encoder(y)
 
         # Vision Multi Scale Fusion
@@ -62,10 +62,9 @@ class Net(nn.Module):
             torch.zeros(bs, gridnum).to(boxes_sml[0].device).scatter(1, indices, 1).bool().unsqueeze(2).unsqueeze(
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new)
-        ##
-        class_indices = process_yolov3_output(boxes_all)
-        tag = self.lang_encoder(class_indices)
-            
+        ##通过yolo预测结果里的类别的最大概率来对应coco80个类别，传出那个词向量,process_yolov3_output在visual encoder文件里面
+        tag_feature = process_yolov3_output(boxes_all,category_vectors) #已经是经过GloVe处理好的tag tensor，直接过个线性层在后面用就行
+        tag_feature = self.adjust_dim(tag_feature)  # 调整维度以匹配 self.linear_ts
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
         bs, gridnum, ch = i_new.shape
@@ -76,7 +75,7 @@ class Net(nn.Module):
         # Anchor-based Contrastive Learning
         x_new = self.linear_vs(i_new)
         y_new = self.linear_ts(y_['lang_feat']) #change to word embedding
-        tag_new = self.linear_ts(tag['lang_feat']) # get the tag feature
+        tag_new = self.linear_ts(tag_feature) # get the tag feature
         if self.training:
             loss = self.head(x_new, y_new,tag_new) # add tag-text CL
             return loss
