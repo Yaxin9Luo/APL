@@ -3,77 +3,59 @@ import torch
 import torch.nn as nn
 
 
-def getContrast(vis_emb, lan_emb,tag_emb):
-    sim_map = torch.einsum('avd, bqd -> baqv',vis_emb,lan_emb)
-    # Compute similarities between text and tag embeddings
-    # print("lan_emb", lan_emb.shape) #lan_emb torch.Size([64, 15, 512])
-    # print("tag_emb", tag_emb.shape) #tag_emb torch.Size([908544, 512])
+def getContrast(vis_emb, lan_emb, tag_emb,a=1.0,b=1.0):
+    # 计算视觉特征和语言特征之间的相似度 vis_lan_sim是[64,64,1,17]
+    vis_lan_sim = torch.einsum('avd, bqd -> baqv', vis_emb, lan_emb)
+    batchsize = vis_lan_sim.shape[0]
+    vis_lan_max_sims, _ = vis_lan_sim.topk(k=2,dim=-1,largest=True, sorted=True) # torch.Size([64, 64, 1, 2])
+    vis_lan_max_sims = vis_lan_max_sims.squeeze(2) #torch.Size([64, 64, 2])
+    # 计算语言特征和标签特征之间的相似度 lan_tag_sim是[64,10816,1,1]
+    lan_tag_sim = torch.einsum('avd, bqd -> baqv', tag_emb, lan_emb)
+    lan_tag_max_sims, _ = lan_tag_sim.topk(k=64,dim=1,largest=True, sorted=True) # torch.Size([64, 64, 1, 1])
+    # 扩展 lan_tag_max_sims 到 [64, 64, 1, 2]
+    lan_tag_max_sims = torch.cat((lan_tag_max_sims, lan_tag_max_sims), dim=-1)  # 形状为 [64, 64, 1, 2]
+    lan_tag_max_sims = lan_tag_max_sims.squeeze(2)#torch.Size([64, 64, 2])
+    # visual-text Negative Anchor Augmentation
+    vis_lan_max_sims_0, vis_lan_max_sims_1 = vis_lan_max_sims[..., 0], vis_lan_max_sims[..., 1]
+    vis_lan_max_sims_1 = vis_lan_max_sims_1.masked_select(~torch.eye(batchsize).bool().to(vis_lan_max_sims_1.device)).contiguous().view(batchsize, batchsize - 1)
+    new_logits_visual = torch.cat([vis_lan_max_sims_0, vis_lan_max_sims_1], dim=1) # shape of logit visual: torch.Size([64, 127])
+    # tag-text Negative Anchor Augmentation
+    lan_tag_max_sims_0, lan_tag_max_sims_1 = lan_tag_max_sims[..., 0], lan_tag_max_sims[..., 1]
+    lan_tag_max_sims_1 = lan_tag_max_sims_1.masked_select(~torch.eye(batchsize).bool().to(lan_tag_max_sims_1.device)).contiguous().view(batchsize, batchsize - 1)
+    new_logits_tag = torch.cat([lan_tag_max_sims_0, lan_tag_max_sims_1], dim=1)
 
-    sim_map_lt = torch.einsum('bwd, td -> bwt', lan_emb, tag_emb)
-    batchsize = sim_map.shape[0]
-    #select the max score from word level
-    sim_map,_=sim_map.topk(k=1, dim=2, largest=True, sorted=True)
-    # print("sim_map",sim_map.shape)
-    max_sims,_ = sim_map.topk(k=2, dim=-1, largest=True, sorted=True) 
-    # print("max_sims",max_sims.shape)
-    max_sims = max_sims.squeeze(2)
-    # print("squeezed max_sims",max_sims.shape)
-    
-    # Process Language-Tag similarity
-    max_sims_lt, _ = sim_map_lt.topk(k=2, dim=-1, largest=True, sorted=True)
-
-    # Negative Anchor Augmentation
-    max_sim_0,max_sim_1 = max_sims[...,0],max_sims[...,1]
-    max_sim_lt_0, max_sim_lt_1 = max_sims_lt[..., 0], max_sims_lt[..., 1]
-
-    # print(max_sim_0.shape)
-    # print(max_sim_1.shape)
-    # print("batchsize:", batchsize)
-    # print("max_sim_1 shape before masking:", max_sim_1.shape)
-    # print("Mask shape:", (~torch.eye(batchsize).bool().to(max_sim_1.device)).shape)
-
-    max_sim_1 = max_sim_1.masked_select(~torch.eye(batchsize).bool().to(max_sim_1.device)).contiguous().view(batchsize,batchsize-1)
-    
-    mask_lt = ~torch.eye(sim_map.shape[2]).bool().to(sim_map.device)
-    max_sim_lt_1 = max_sim_lt_1.masked_select(mask_lt).contiguous().view(batchsize, -1)
-
-
-    new_logits = torch.cat([max_sim_0,max_sim_1],dim=1)
-    new_logits_lt = torch.cat([max_sim_lt_0, max_sim_lt_1], dim=1)
-    # print(new_logits)
-    # print(new_logits_lt)
-    # print("new_logits shape:", new_logits.shape)
-    # print("new_logits_lt:", new_logits_lt.shape)
-    # 填充零列，将其形状变为 [64, 127]
-    num_cols_to_add = 127 - new_logits_lt.shape[1]
-    if num_cols_to_add > 0:
-        zeros_to_add = torch.zeros(new_logits_lt.shape[0], num_cols_to_add, device='cuda:0')
-        new_logits_lt = torch.cat([new_logits_lt, zeros_to_add], dim=1)
-    new_logits = (new_logits + new_logits_lt) / 2
-
+    #加入text-tag的loss
     target = torch.eye(batchsize).to(vis_emb.device)
     target_pred = torch.argmax(target, dim=1)
-    loss = nn.CrossEntropyLoss(reduction="mean")(new_logits, target_pred)
+    loss_visual = nn.CrossEntropyLoss(reduction="mean")(new_logits_visual, target_pred)
+    loss_tag = nn.CrossEntropyLoss(reduction="mean")(new_logits_tag, target_pred)
+    loss = a*loss_visual + b*loss_tag
     return loss
 
-def getPrediction(vis_emb, lan_emb,tag_emb):
-    sim_map = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)
-    # Compute similarities between visual and tag embeddings
-    sim_map_lt = torch.einsum('bwd, td -> bwt', lan_emb, tag_emb)
-    #select the max score from word level
-    sim_map,_=sim_map.topk(k=1, dim=1, largest=True, sorted=True)
-    #select max score of text-tag
-    sim_map_lt, _ = sim_map_lt.topk(k=1, dim=1, largest=True, sorted=True)
-    print(sim_map)
-    print(sim_map_lt)
-    print("sim_map shape:", sim_map.shape)
-    print("sim_map_lt shape:", sim_map_lt.shape)
-    # Combine the similarities (e.g., averaging)
-    sim_map = (sim_map + sim_map_lt) / 2
+def getPrediction(vis_emb, lan_emb, tag_emb):
+    # 计算视觉特征和语言特征之间的相似度
+    vis_lan_sim = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)  # [64, 1, 17]
 
-    maxval, v = sim_map.max(dim=2, keepdim=True)
-    predictions = torch.zeros_like(sim_map).to(sim_map.device).scatter(2,v.expand(sim_map.shape), 1).bool()
+    # 计算标签特征和语言特征之间的相似度
+    lan_tag_sim = torch.einsum('bkd, ckd -> bkc', lan_emb, tag_emb)  # [64, 1, 10816]
+
+    # 从 lan_tag_sim 中选出每个批次中最大的17个值
+    top_values, top_indices = lan_tag_sim.topk(17, dim=-1)  # top_values: [64, 1, 17], top_indices: [64, 1, 17]
+
+    # 结合视觉和标签的相似度
+    total_sim = vis_lan_sim + top_values
+
+    # 根据总的相似度分数进行预测
+    maxval, v = total_sim.max(dim=2, keepdim=True)
+    predictions = torch.zeros_like(total_sim).to(total_sim.device).scatter(2, v.expand(total_sim.shape), 1).bool()
+
     return predictions
+
+
+
+
+
+
 
 class WeakREChead(nn.Module):
     def __init__(self, __C):

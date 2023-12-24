@@ -8,13 +8,16 @@ import json
 import spacy
 
 
-nlp = spacy.load('en_core_web_lg')
+# nlp = spacy.load('en_core_web_lg')
 
-#load coco categories from the JSON file
-with open('/root/autodl-tmp/Improve_RefCLIP/data/anns/cat_name.json', 'r') as f:
-    categories = json.load(f)
+# #load coco categories from the JSON file
+# with open('/root/autodl-tmp/Improve_RefCLIP/data/anns/cat_name.json', 'r') as f:
+#     categories = json.load(f)
 
-category_vectors = {cat: nlp(cat_name).vector for cat, cat_name in categories.items()}
+# category_vectors = {cat: nlp(cat_name).vector for cat, cat_name in categories.items()}
+# vectors_list = [category_vectors[cat] for cat in categories.keys()]
+# category_vectors = torch.tensor(vectors_list).to("cuda:0")
+
 
     
 class YOLOv3Head(nn.Module):
@@ -224,19 +227,21 @@ def visual_encoder(__C):
 
 
 
-def process_yolov3_output(yolov3_output, category_vectors,device="cuda:0"):
+def process_yolov3_output(yolov3_output, device="cuda:0"):
 
-    # 获取类别概率部分
-    class_probs = yolov3_output[..., 5:]  # 类别概率位于最后的维度[64, 14196, 80]，[批次，锚点，类别]
+    # 获取类别概率
+    class_probs = yolov3_output[..., 5:]  # 形状：[64, 169, 4, 80]
 
-    # 计算每个锚点的最大类别概率
-    _, topk_class_indices = torch.max(class_probs, dim=-1)
-    # 展平 topk_class_indices 以便处理
-    topk_class_indices = topk_class_indices.view(-1)  # 转换为一维数组
+    # 计算最大类别概率的索引
+    _, topk_class_indices = torch.max(class_probs, dim=-1)  # 形状：[64, 169, 4]
 
-    # 将类别索引映射到词向量
-    word_vectors = [category_vectors[str(index.item())] for index in topk_class_indices]
-    # 将词向量列表转换为张量
-    word_vectors_tensor = torch.tensor(word_vectors).to(device)
-    return word_vectors_tensor
+    # 使用张量索引将类别索引映射到词向量
+    topk_class_indices = topk_class_indices.to(device)
+    batch_size, grid_size, num_anchors = topk_class_indices.size()
+    # 重塑为 [batch_size * grid_size, num_anchors]
+    # 现在 tag_feature 是二维张量，可以输入到文本编码器
+    topk_class_indices = topk_class_indices.view(batch_size * grid_size, num_anchors)
+
+    return topk_class_indices
+
 
