@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from models.language_encoder import language_encoder
-from models.visual_encoder import visual_encoder , process_yolov3_output,class_names
+from models.visual_encoder import visual_encoder , process_yolov3_output
 from models.RefCLIP.head import WeakREChead
 from models.network_blocks import MultiScaleFusion
 
@@ -42,15 +42,6 @@ class Net(nn.Module):
         with torch.no_grad():
             boxes_all, x_, boxes_sml = self.visual_encoder(x)
         y_ = self.lang_encoder(y)
-        ### Debugging
-        # print("what is boxes_sml:", boxes_sml[0])
-        # print("shape of boxes_sml:", boxes_sml[0].shape)
-        # print('y is:', y)
-        # print("And shape of y is:", y.shape)
-        # print("Contents of y_:", y_)
-        # encoded_feature = y_['lang_feat']
-        # print("y after encoder:", encoded_feature.shape)
-        # exit()
         
         # Vision Multi Scale Fusion
         s, m, l = x_
@@ -70,9 +61,9 @@ class Net(nn.Module):
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new) 
         ###选出筛选过后的锚点的类别，传出那个类别的词索引然后投入encoder。process_yolov3_output在visual encoder文件里面
-        tag_feature = process_yolov3_output(boxes_sml[0]) #现在tag特征是[64, 169,2]
+        tag_feature = process_yolov3_output(boxes_sml_new[0]) #现在tag特征是[64,17,2]
         bssize,sequence,ft = tag_feature.shape
-        tag_feature = tag_feature.view(bssize*sequence,ft) #[64*169,2]
+        tag_feature = tag_feature.view(bssize*sequence,ft) #[64*17,2]
         tag_feature_ = self.lang_encoder(tag_feature)
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
@@ -84,14 +75,8 @@ class Net(nn.Module):
         # Anchor-based Contrastive Learning
         x_new = self.linear_vs(i_new) #[64,17,512]
         y_new = self.linear_ts(y_['flat_lang_feat'].unsqueeze(1)) #[64,1,512]
-        tag_new = self.linear_ts(tag_feature_['flat_lang_feat'].unsqueeze(1)) # get the tag embedding [10816, 1, 512]
-        # print(x_new)
-        # print("shape of x_new:", x_new.shape)
-        # print(y_new)
-        # print(tag_new)
-        # print("shape of y_new is:", y_new.shape)
-        # print("shape of tag_new is:", tag_new.shape)
-        tag_new = tag_new.view(bssize,sequence,1,512) #[64,169,1,512]
+        tag_new = self.linear_ts(tag_feature_['flat_lang_feat'].unsqueeze(1)) # get the tag embedding [1088, 1, 512]
+        tag_new = tag_new.view(bssize,sequence,1,512) #[64,17,1,512]
         if self.training:
             loss = self.head(x_new, y_new,tag_new) # add tag-text CL
             return loss

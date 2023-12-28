@@ -3,12 +3,12 @@ import torch
 import torch.nn as nn
 
 
-def getContrast(vis_emb, lan_emb, tag_emb):
+def getContrast(vis_emb, lan_emb, tag_emb, a=0.5):
+    # vis_emb.shape = [64,17,512], lan_emb.shape = [64,1,512], tag_emb = [64,17,1,512]
     sim_map_vis = torch.einsum('avd, bqd -> baqv',vis_emb,lan_emb) #[64,64,1,17]
 
-    sim_map_tag = torch.einsum('azvd, bqd -> baqz',tag_emb,lan_emb) #[64,64,1,169]
-    sim_map_tag= sim_map_tag.topk(17, dim=-1)[0]  # 从169里面选出top17 [64,1,169]变成[64,1,17]
-    sim_map=(sim_map_vis+sim_map_tag)/2. 
+    sim_map_tag = torch.einsum('azvd, bqd -> baqz',tag_emb,lan_emb) #[64,64,1,17]
+    sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
     batchsize = sim_map.shape[0]
     max_sims,_ = sim_map.topk(k=2, dim=-1, largest=True, sorted=True)
     max_sims = max_sims.squeeze(2)
@@ -23,14 +23,13 @@ def getContrast(vis_emb, lan_emb, tag_emb):
     loss = nn.CrossEntropyLoss(reduction="mean")(new_logits, target_pred)
     return loss
 
-def getPrediction(vis_emb, lan_emb, tag_emb):
+def getPrediction(vis_emb, lan_emb, tag_emb, a=0.5):
     # 计算视觉特征和语言特征之间的相似度
-    vis_lan_sim = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)  
+    sim_map_vis = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)  
 
     # 计算标签特征和语言特征之间的相似度
-    lan_tag_sim = torch.einsum('bkd, bzyd -> byz', lan_emb, tag_emb) 
-    lan_tag_sim = lan_tag_sim.topk(17,dim=-1)[0]
-    sim_map=(vis_lan_sim+lan_tag_sim)/2.
+    sim_map_tag = torch.einsum('bkd, bzyd -> byz', lan_emb, tag_emb) 
+    sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
 
     # 根据总的相似度分数进行预测
     maxval, v = sim_map.max(dim=2, keepdim=True)
