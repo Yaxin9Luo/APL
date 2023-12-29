@@ -234,11 +234,11 @@ def process_yolov3_output(yolov3_output, device="cuda:0"):
     # sample_boxes = yolov3_output[2, ... ,0:5].mean(2)
     # sample_boxes = sample_boxes.cpu().numpy() #[17,4]
     # # 将索引映射到类别名称
-    # sample_class_probs = topk_class_indices[2, 4:]  # 形状：[17]
+    # sample_class_probs = topk_class_indices[0, 4:]  # 形状：[17]
     # sample_class_probs = sample_class_probs.cpu().numpy()
-    # # 将索引映射到类别名称
     # predicted_classes = [cats[idx] for idx in sample_class_probs]
     # print(predicted_classes)
+    # exit()
     # ## 绘制边界框和类别标签可视化用
     # for i, label in zip(range(sample_boxes.shape[0]),predicted_classes):
     #     # 提取坐标

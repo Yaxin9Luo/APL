@@ -3,9 +3,7 @@
 import os
 import cv2
 import json, re, random,en_vectors_web_lg
-import spacy
 import numpy as np
-
 import torch
 import torch.utils.data as Data
 import torch.distributed as dist
@@ -68,6 +66,7 @@ class RefCOCODataSet(Data.Dataset):
         self.transforms=transforms.Compose([transforms.ToTensor(), transforms.Normalize(__C.MEAN, __C.STD)])
 
 
+
     def tokenize(self, stat_refs_list, use_glove):
         token_to_ix = {
             'PAD': 0,
@@ -82,6 +81,7 @@ class RefCOCODataSet(Data.Dataset):
             pretrained_emb.append(spacy_tool('PAD').vector)
             pretrained_emb.append(spacy_tool('UNK').vector)
             pretrained_emb.append(spacy_tool('CLS').vector)
+
         max_token = 0
         for split in stat_refs_list:
             for ann in stat_refs_list[split]:
@@ -105,6 +105,7 @@ class RefCOCODataSet(Data.Dataset):
         ix_to_token={}
         for item in token_to_ix:
             ix_to_token[token_to_ix[item]]=item
+
         return token_to_ix, ix_to_token,pretrained_emb, max_token
 
 

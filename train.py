@@ -114,7 +114,7 @@ def main_worker(gpu, __C):
         dist.init_process_group(backend=dist.Backend('NCCL'), init_method=__C.DIST_URL, world_size=__C.WORLD_SIZE,
                                 rank=__C.RANK)
 
-    train_set = RefCOCODataSet(__C, split='train')
+    train_set = RefCOCODataSet(__C, split='train') 
     train_loader = loader(__C, train_set, gpu, shuffle=(not __C.MULTIPROCESSING_DISTRIBUTED), drop_last=True)
 
     val_set = RefCOCODataSet(__C, split='val')

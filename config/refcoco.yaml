@@ -9,6 +9,7 @@ MODEL:
   FF_SIZE: 2048
   FLAT_GLIMPSES: 1
   LANG_ENC: 'lstm'
+  TAG_ENC: 'tag'
   N_SA: 3
   VIS_ENC: 'yolov3'
   VIS_FREEZE: True
@@ -16,7 +17,7 @@ MODEL:
   CLASS_NUM: 80
 
 TRAIN:
-  GPU: [3]
+  GPU: [6]
   BATCH_SIZE: 64 # total batch size on a single node if multiprocessing_distributed else batch size on one gpu
   NUM_WORKER: 8 # same as BATCH_SIZE
   LR: 0.0001
@@ -36,7 +37,7 @@ TRAIN:
   OPT_PARAMS: {betas: '(0.9, 0.98)', eps: '1e-9'}
   GRAD_NORM_CLIP: 0.15
   AMP: False
-  SEED: 123456
+  SEED: 666666
 
 DISTRIBUTED:
   # 1 on node 1, 0 on node 0

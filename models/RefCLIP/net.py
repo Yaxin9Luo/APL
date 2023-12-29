@@ -7,7 +7,7 @@ from models.language_encoder import language_encoder
 from models.visual_encoder import visual_encoder , process_yolov3_output
 from models.RefCLIP.head import WeakREChead
 from models.network_blocks import MultiScaleFusion
-
+from models.tag_encoder import tag_encoder
 
 
 
@@ -17,10 +17,10 @@ class Net(nn.Module):
         self.select_num = __C.SELECT_NUM
         self.visual_encoder = visual_encoder(__C).eval()
         self.lang_encoder = language_encoder(__C, pretrained_emb, token_size)
-
+        self.tag_encoder = tag_encoder(__C, pretrained_emb, token_size)
         self.linear_vs = nn.Linear(1024, __C.HIDDEN_SIZE)
         self.linear_ts = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
-
+        self.linear_tag = nn.Linear(__C.HIDDEN_SIZE,__C.HIDDEN_SIZE) # 创建tag专用的Linear层
         self.head = WeakREChead(__C)
         self.multi_scale_manner = MultiScaleFusion(v_planes=(256, 512, 1024), hiden_planes=1024, scaled=True)
         self.class_num = __C.CLASS_NUM
@@ -64,7 +64,7 @@ class Net(nn.Module):
         tag_feature = process_yolov3_output(boxes_sml_new[0]) #现在tag特征是[64,17,2]
         bssize,sequence,ft = tag_feature.shape
         tag_feature = tag_feature.view(bssize*sequence,ft) #[64*17,2]
-        tag_feature_ = self.lang_encoder(tag_feature)
+        tag_feature_ = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
         bs, gridnum, ch = i_new.shape
@@ -75,7 +75,7 @@ class Net(nn.Module):
         # Anchor-based Contrastive Learning
         x_new = self.linear_vs(i_new) #[64,17,512]
         y_new = self.linear_ts(y_['flat_lang_feat'].unsqueeze(1)) #[64,1,512]
-        tag_new = self.linear_ts(tag_feature_['flat_lang_feat'].unsqueeze(1)) # get the tag embedding [1088, 1, 512]
+        tag_new = self.linear_tag(tag_feature_['flat_lang_feat'].unsqueeze(1)) # get the tag embedding [1088, 1, 512]
         tag_new = tag_new.view(bssize,sequence,1,512) #[64,17,1,512]
         if self.training:
             loss = self.head(x_new, y_new,tag_new) # add tag-text CL
