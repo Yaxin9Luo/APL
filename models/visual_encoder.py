@@ -231,7 +231,7 @@ def process_yolov3_output(yolov3_output, device="cuda:0"):
     _, topk_class_indices = torch.max(class_probs, dim=-1)  # 计算最大类别概率的索引，形状：[64, 17]
     
     ### 可视化用
-    # sample_boxes = yolov3_output[2, ... ,0:5].mean(2)
+    # sample_boxes = yolov3_output[0, ... ,0:5].mean(2)
     # sample_boxes = sample_boxes.cpu().numpy() #[17,4]
     # # 将索引映射到类别名称
     # sample_class_probs = topk_class_indices[0, 4:]  # 形状：[17]
@@ -261,19 +261,61 @@ def process_yolov3_output(yolov3_output, device="cuda:0"):
     # # 保存图像
     # image_pil.save('/hdd1/Improve_RefCLIP/debug_image.jpg')
     # exit()
-    
-    # 使用张量索引将类别索引映射到词向量
-    topk_class_indices = topk_class_indices.to(device).unsqueeze(-1).repeat(1,1,2)   # 形状：[64, 17]->[64, 17, 2]
-    bs=topk_class_indices.shape[0]
-
+    # 将索引映射到类别名称
+    sample_class_probs = topk_class_indices # 形状：[64，17]
+    sample_class_probs = sample_class_probs.cpu().numpy()
+    predicted_classes = [[cats[idx] for idx in row] for row in sample_class_probs]
+    # for i, batch in enumerate(predicted_classes): ## print to check whether match the words in the dictionary 
+    #     print(f"Batch {i}: {batch}")
+     # 使用张量索引将类别索引映射到词向量
+    predicted_indices = [[token_to_ix.get(word, token_to_ix['UNK']) for word in batch] for batch in predicted_classes]
+    predicted_indices_tensor = torch.tensor(predicted_indices, dtype=torch.long).unsqueeze(-1).to(device) # [64, 17] --> [64,17,1]
+    # for i, batch_indices in enumerate(predicted_indices): ## print to check the glove indices actually match the real words of the tags
+    #     print(f"Batch {i}: {batch_indices}")
+    bs=predicted_indices_tensor.shape[0]
     # 用索引获取具体类别的tokenizer index
-    tag_token_index=tokenizer_index.unsqueeze(0).repeat(bs,1,1).gather(1,topk_class_indices) # 形状：[64, 17*2]
-    tag_token_index=tag_token_index.view(bs,-1, 2) # 形状：[64, 17,2]
+    # bbox_data = yolov3_output[..., :4].reshape(-1, 4)  # Reshape to [batch_size * num_anchors * grid_size, bbox_attributes] = [4352, 4] 第十三组实验的代码
+    bbox_data = yolov3_output[..., :4].mean(2).reshape(-1,4) # [64, 17, 4]第十四组实验的代码
 
-    return tag_token_index
+    # Calculate midpoints, widths, and heights for all bounding boxes
+    midpoints = bbox_data[:, :2]  # [x_center, y_center]
+    widths = bbox_data[:, 2]
+    heights = bbox_data[:, 3]
+    # Process all bounding boxes in the batch to determine their positions
+    positions = determine_position(midpoints, widths, heights)
 
+    # Convert positions to indices
+    position_indices = [token_to_ix.get(position, token_to_ix['UNK']) for position in positions]
+    # for i, batch_indices in enumerate(position_indices): ## print to check the position indices actually match the real positon words in GloVe
+    #     print(f"Batch {i}: {batch_indices}")
+    # Reshape the flat list of indices back into the batch format
+    position_indices_tensor = torch.tensor(position_indices, device=device, dtype=torch.long)
+    # position_indices_tensor = position_indices_tensor.view(yolov3_output.shape[0], yolov3_output.shape[1], yolov3_output.shape[2]) # 第十三组实验代码
+    position_indices_tensor = position_indices_tensor.view(yolov3_output.shape[0], yolov3_output.shape[1], predicted_indices_tensor.shape[2]) #第十四组实验代码
+    # print(position_indices_tensor.shape) # 用四个grid就是 torch.Size([64, 17, 4])， 而取grid平均用一个就是t orch.Size([64, 17, 1])
+    # Combine position indices with tag_token_index
+    combined_indices = torch.cat((position_indices_tensor,predicted_indices_tensor), dim=-1)# [64, 17, 5]
+    # print(combined_indices[1,1,:])  # tensor([2270, 1359, 1359, 2270,  454], device='cuda:0') ex: bottomright middleright middleright bottomright bottle
+    
+    # ## 打印一下加入位置信息之后的tag词语是什么样，检查检
+    # # Step 1: Inverse Mapping
+    # ix_to_token = {v: k for k, v in token_to_ix.items()}
+
+    # # Step 2: Convert Tensor Indices to Words
+    # combined_indices_cpu = combined_indices.cpu().numpy()
+    # combined_words = [[[ix_to_token.get(index, 'UNK') for index in anchor] for anchor in batch] for batch in combined_indices_cpu]
+
+    # # Step 3: Construct Readable Format
+    # formatted_output = [' | '.join([' '.join(anchor) for anchor in batch]) for batch in combined_words]
+
+    # # Step 4: Print for Verification
+    # for i, batch_output in enumerate(formatted_output[:5]):  # Print first 5 batches
+    #     print(f"Batch {i}: {batch_output}\n")
+    return combined_indices
+    
+    
 def proc_ref(token_to_ix,cat, max_token=2):
-        ques_ix = np.zeros(max_token, np.int64)
+        ques_ix = np.zeros(max_token, np.int64) 
 
         # words = re.sub(
         #     r"([.,'!?\"()*#:;])",
@@ -291,3 +333,39 @@ def proc_ref(token_to_ix,cat, max_token=2):
                 break
 
         return ques_ix
+def determine_position(midpoints, width, height):
+    # Define thresholds for position classification
+    vertical_thresholds = height / 3
+    horizontal_thresholds = width / 3
+    positions = []
+    # Iterate over each bounding box
+    for i in range(len(midpoints)):
+        x, y = midpoints[i][0], midpoints[i][1]
+        vertical_threshold = vertical_thresholds[i]
+        horizontal_threshold = horizontal_thresholds[i]
+
+        # Determine vertical position
+        if y < vertical_threshold:
+            vertical_position = "top"
+        elif y > 2 * vertical_threshold:
+            vertical_position = "bottom"
+        else:
+            vertical_position = "middle"
+
+        # Determine horizontal position
+        if x < horizontal_threshold:
+            horizontal_position = "left"
+        elif x > 2 * horizontal_threshold:
+            horizontal_position = "right"
+        else:
+            horizontal_position = "middle"
+
+        # Combine vertical and horizontal position
+        if vertical_position == "middle" and horizontal_position == "middle":
+            position = "middle"
+        else:
+            position = vertical_position + horizontal_position
+
+        positions.append(position)
+
+    return positions

@@ -21,6 +21,7 @@ class Net(nn.Module):
         self.linear_vs = nn.Linear(1024, __C.HIDDEN_SIZE)
         self.linear_ts = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
         self.linear_tag = nn.Linear(__C.HIDDEN_SIZE,__C.HIDDEN_SIZE) # 创建tag专用的Linear层
+        # self.fusion_layer_concate = nn.Linear(1024,__C.HIDDEN_SIZE) # 创建融合visual和tag特征专用的Linear层,concatenate用的线性层
         self.head = WeakREChead(__C)
         self.multi_scale_manner = MultiScaleFusion(v_planes=(256, 512, 1024), hiden_planes=1024, scaled=True)
         self.class_num = __C.CLASS_NUM
@@ -56,14 +57,15 @@ class Net(nn.Module):
         vals, indices = mean_i.topk(k=int(self.select_num), dim=1, largest=True, sorted=True)
         bs, gridnum, anncornum, ch = boxes_sml[0].shape
         bs_, selnum = indices.shape
+        
         box_sml_new = boxes_sml[0].masked_select(
             torch.zeros(bs, gridnum).to(boxes_sml[0].device).scatter(1, indices, 1).bool().unsqueeze(2).unsqueeze(
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new) 
         ###选出筛选过后的锚点的类别，传出那个类别的词索引然后投入encoder。process_yolov3_output在visual encoder文件里面
-        tag_feature = process_yolov3_output(boxes_sml_new[0]) #现在tag特征是[64,17,2]
+        tag_feature = process_yolov3_output(boxes_sml_new[0]) #[64,17,5],4 grid location+1 tag,for example:bottomright,middleright,middleright,bottomright,bottle
         bssize,sequence,ft = tag_feature.shape
-        tag_feature = tag_feature.view(bssize*sequence,ft) #[64*17,2]
+        tag_feature = tag_feature.view(bssize*sequence,ft) #[64*17,5]
         tag_feature_ = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)

@@ -3,15 +3,12 @@ import torch
 import torch.nn as nn
 
 
-def getContrast(vis_emb, lan_emb, tag_emb, a=0.65):
+def getContrast(vis_emb, lan_emb, tag_emb, a = 0.8):
     # vis_emb.shape = [64,17,512], lan_emb.shape = [64,1,512], tag_emb = [64,17,1,512]
     #text-visual
     sim_map_vis = torch.einsum('avd, bqd -> baqv',vis_emb,lan_emb) #[64,64,1,17]
-    ##加入tag-visual之间的相似度来更好的对齐tag和视觉特征
-    # sim_map_vistag = torch.einsum('azvd, bqd -> bavq',tag_emb,vis_emb) # [64,64,1,17]
     #tag-text
     sim_map_tag = torch.einsum('azvd, bqd -> baqz',tag_emb,lan_emb) #[64,64,1,17]
-    # sim_map = (sim_map_vis + sim_map_vistag + sim_map_tag)/3. #加visualtag试试
     
     sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
     batchsize = sim_map.shape[0]
@@ -28,16 +25,12 @@ def getContrast(vis_emb, lan_emb, tag_emb, a=0.65):
     loss = nn.CrossEntropyLoss(reduction="mean")(new_logits, target_pred)
     return loss
 
-def getPrediction(vis_emb, lan_emb, tag_emb, a=0.65):
+def getPrediction(vis_emb, lan_emb, tag_emb, a = 0.8):
     # 计算视觉特征和语言特征之间的相似度
     sim_map_vis = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)  
-    #加入tag-visual之间的相似度来更好的对齐tag和视觉特征
-    # sim_map_vistag = torch.einsum('bzyd, bkd -> byk',tag_emb,vis_emb) 
     # 计算标签特征和语言特征之间的相似度
     sim_map_tag = torch.einsum('bkd, bzyd -> byz', lan_emb, tag_emb) 
     
-    # sim_map = (sim_map_vis + sim_map_vistag + sim_map_tag)/3. #加visual-tag试试
-
     sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
 
     # 根据总的相似度分数进行预测
@@ -46,16 +39,17 @@ def getPrediction(vis_emb, lan_emb, tag_emb, a=0.65):
 
     return predictions
 
+
 class WeakREChead(nn.Module):
     def __init__(self, __C):
         super(WeakREChead, self).__init__()
 
-    def forward(self, vis_fs,lan_fs,tag_fs):
+    def forward(self, fusion_fs,lan_fs, tag_fs):
         if self.training:
-            loss = getContrast(vis_fs, lan_fs,tag_fs)
+            loss = getContrast(fusion_fs, lan_fs, tag_fs)
             return loss
         else:
-            predictions = getPrediction(vis_fs, lan_fs, tag_fs)
+            predictions = getPrediction(fusion_fs, lan_fs, tag_fs)
             return predictions
 
 

@@ -27,8 +27,7 @@ class TagEncoder(nn.Module):
             dropout=__C.DROPOUT_R,
             bidirectional=False
         )
-
-        self.sa_list = nn.ModuleList([SA(__C) for _ in range(__C.N_SA)])
+        self.sa_list = nn.ModuleList([SA(__C) for _ in range(__C.N_SA)]) #移除注意力机制试试
         self.att_flat=AttFlat(__C)
         if __C.EMBED_FREEZE:
             self.frozen(self.embedding)
@@ -50,7 +49,6 @@ class TagEncoder(nn.Module):
 
         for sa in self.sa_list:
             lang_feat = sa(lang_feat, lang_feat_mask)
-
         flat_lang_feat = self.att_flat(lang_feat, lang_feat_mask)
         return  {
             'flat_lang_feat':flat_lang_feat,
