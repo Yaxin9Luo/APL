@@ -7,7 +7,7 @@ from models.network_blocks import add_conv,DropBlock,FeatureAdaption,resblock,SP
 import json
 from PIL import Image, ImageDraw, ImageFont
 import cv2
-
+import math
 class YOLOv3Head(nn.Module):
     def __init__(self, anch_mask, n_classes, stride, in_ch=1024, ignore_thre=0.7, label_smooth = False, rfb=False, sep=False):
         super(YOLOv3Head, self).__init__()
@@ -234,7 +234,7 @@ def process_yolov3_output(yolov3_output, device="cuda:0"):
     # sample_boxes = yolov3_output[0, ... ,0:5].mean(2)
     # sample_boxes = sample_boxes.cpu().numpy() #[17,4]
     # # 将索引映射到类别名称
-    # sample_class_probs = topk_class_indices[0, 4:]  # 形状：[17]
+    # sample_class_probs = topk_class_indices[0, :]  # 形状：[17]
     # sample_class_probs = sample_class_probs.cpu().numpy()
     # predicted_classes = [cats[idx] for idx in sample_class_probs]
     # print(predicted_classes)
@@ -249,69 +249,60 @@ def process_yolov3_output(yolov3_output, device="cuda:0"):
     #     y_max = int(y_center + (height / 2))
     #     # 绘制边界框
     #     cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
-
     #     # 绘制类别标签
     #     cv2.putText(image, label, (x_min, y_min), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-
     # # 转换颜色空间回 RGB 以便于 PIL 处理
     # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
     # # 使用 PIL 显示图像
     # image_pil = Image.fromarray(image)
     # # 保存图像
     # image_pil.save('/hdd1/Improve_RefCLIP/debug_image.jpg')
     # exit()
+    
     # 将索引映射到类别名称
     sample_class_probs = topk_class_indices # 形状：[64，17]
     sample_class_probs = sample_class_probs.cpu().numpy()
     predicted_classes = [[cats[idx] for idx in row] for row in sample_class_probs]
-    # for i, batch in enumerate(predicted_classes): ## print to check whether match the words in the dictionary 
-    #     print(f"Batch {i}: {batch}")
      # 使用张量索引将类别索引映射到词向量
     predicted_indices = [[token_to_ix.get(word, token_to_ix['UNK']) for word in batch] for batch in predicted_classes]
     predicted_indices_tensor = torch.tensor(predicted_indices, dtype=torch.long).unsqueeze(-1).to(device) # [64, 17] --> [64,17,1]
-    # for i, batch_indices in enumerate(predicted_indices): ## print to check the glove indices actually match the real words of the tags
-    #     print(f"Batch {i}: {batch_indices}")
-    bs=predicted_indices_tensor.shape[0]
-    # 用索引获取具体类别的tokenizer index
-    # bbox_data = yolov3_output[..., :4].reshape(-1, 4)  # Reshape to [batch_size * num_anchors * grid_size, bbox_attributes] = [4352, 4] 第十三组实验的代码
-    bbox_data = yolov3_output[..., :4].mean(2).reshape(-1,4) # [64, 17, 4]第十四组实验的代码
-
-    # Calculate midpoints, widths, and heights for all bounding boxes
-    midpoints = bbox_data[:, :2]  # [x_center, y_center]
-    widths = bbox_data[:, 2]
-    heights = bbox_data[:, 3]
-    # Process all bounding boxes in the batch to determine their positions
-    positions = determine_position(midpoints, widths, heights)
-
-    # Convert positions to indices
-    position_indices = [token_to_ix.get(position, token_to_ix['UNK']) for position in positions]
-    # for i, batch_indices in enumerate(position_indices): ## print to check the position indices actually match the real positon words in GloVe
-    #     print(f"Batch {i}: {batch_indices}")
-    # Reshape the flat list of indices back into the batch format
-    position_indices_tensor = torch.tensor(position_indices, device=device, dtype=torch.long)
-    # position_indices_tensor = position_indices_tensor.view(yolov3_output.shape[0], yolov3_output.shape[1], yolov3_output.shape[2]) # 第十三组实验代码
-    position_indices_tensor = position_indices_tensor.view(yolov3_output.shape[0], yolov3_output.shape[1], predicted_indices_tensor.shape[2]) #第十四组实验代码
-    # print(position_indices_tensor.shape) # 用四个grid就是 torch.Size([64, 17, 4])， 而取grid平均用一个就是t orch.Size([64, 17, 1])
-    # Combine position indices with tag_token_index
-    combined_indices = torch.cat((position_indices_tensor,predicted_indices_tensor), dim=-1)# [64, 17, 5]
-    # print(combined_indices[1,1,:])  # tensor([2270, 1359, 1359, 2270,  454], device='cuda:0') ex: bottomright middleright middleright bottomright bottle
+    # Get bbox coordinates
+    bbox = yolov3_output[..., :2].mean(2)  # [64, 17, 2] bbox midpoints [batch, num_anchors, x_center, y_center]
+    # 加入position embedding from class PositionEmbeddingSine
+    pos_encoder = PositionEmbeddingSine()
     
-    # ## 打印一下加入位置信息之后的tag词语是什么样，检查检
+    image_size = 416.0
+    scaled_bbox = bbox / image_size  # Normalize coordinates to [0, 1]
+    position_embeddings = pos_encoder(scaled_bbox) # 第二种 position class实现
+
+    
+    
+    # # 获取box坐标
+    # bbox_data = yolov3_output[..., :4].mean(2).reshape(-1,4) # [64, 17, 4]
+    # # Calculate midpoints, widths, and heights for all bounding boxes
+    # midpoints = bbox_data[:, :2]  # boxes' midpoints [x_center, y_center]
+    # # Process all bounding boxes in the batch to determine their positions
+    # positions = determine_position(midpoints)
+    # # Convert positions to indices
+    # position_indices = [token_to_ix.get(position, token_to_ix['UNK']) for position in positions]
+    # position_indices_tensor = torch.tensor(position_indices, device=device, dtype=torch.long)
+    # position_indices_tensor = position_indices_tensor.view(yolov3_output.shape[0], yolov3_output.shape[1], predicted_indices_tensor.shape[2])
+    # combined_indices = torch.cat((position_indices_tensor,predicted_indices_tensor), dim=-1)# [64, 17, 2]
+    
+    
+    # ## 打印一下加入位置信息之后的tag词语是什么样，检查检查
     # # Step 1: Inverse Mapping
     # ix_to_token = {v: k for k, v in token_to_ix.items()}
-
     # # Step 2: Convert Tensor Indices to Words
     # combined_indices_cpu = combined_indices.cpu().numpy()
     # combined_words = [[[ix_to_token.get(index, 'UNK') for index in anchor] for anchor in batch] for batch in combined_indices_cpu]
-
     # # Step 3: Construct Readable Format
     # formatted_output = [' | '.join([' '.join(anchor) for anchor in batch]) for batch in combined_words]
-
     # # Step 4: Print for Verification
-    # for i, batch_output in enumerate(formatted_output[:5]):  # Print first 5 batches
+    # for i, batch_output in enumerate(formatted_output[:]):  # Print first 5 batches
     #     print(f"Batch {i}: {batch_output}\n")
-    return combined_indices
+    # exit()
+    return predicted_indices_tensor, position_embeddings
     
     
 def proc_ref(token_to_ix,cat, max_token=2):
@@ -333,39 +324,69 @@ def proc_ref(token_to_ix,cat, max_token=2):
                 break
 
         return ques_ix
-def determine_position(midpoints, width, height):
-    # Define thresholds for position classification
-    vertical_thresholds = height / 3
-    horizontal_thresholds = width / 3
-    positions = []
-    # Iterate over each bounding box
-    for i in range(len(midpoints)):
-        x, y = midpoints[i][0], midpoints[i][1]
-        vertical_threshold = vertical_thresholds[i]
-        horizontal_threshold = horizontal_thresholds[i]
+    
+# def determine_position(midpoints, image_size=(416, 416)):
+#     image_width, image_height = image_size
+#     # Define thresholds for position classification based on the center of the image
+#     vertical_threshold = image_height / 2
+#     horizontal_threshold = image_width / 2
+#     vertical_interval = 0.5
+#     horizontal_interval = 0.0
+#     positions = []
+#     # Iterate over each bounding box
+#     for midpoint in midpoints:
+#         x, y = midpoint
 
-        # Determine vertical position
-        if y < vertical_threshold:
-            vertical_position = "top"
-        elif y > 2 * vertical_threshold:
-            vertical_position = "bottom"
-        else:
-            vertical_position = "middle"
+#         # Determine position
+#         if y < vertical_threshold - vertical_interval:
+#             if x < horizontal_threshold - horizontal_interval:
+#                 position = "left"  # bottom left quarter
+#             elif x > horizontal_threshold + horizontal_interval:
+#                 position = "right"  # bottom right quarter
+#             else:
+#                 position = "bottom"
+#         elif y > vertical_threshold + vertical_interval:
+#             if x < horizontal_threshold - horizontal_interval:
+#                 position = "left"  # top left quarter
+#             elif x > horizontal_threshold + horizontal_interval:
+#                 position = "right"  # top right quarter
+#             else:
+#                 position = "top"
+#         else:
+#             position = "middle"  # Middle horizontal line
 
-        # Determine horizontal position
-        if x < horizontal_threshold:
-            horizontal_position = "left"
-        elif x > 2 * horizontal_threshold:
-            horizontal_position = "right"
-        else:
-            horizontal_position = "middle"
+#         positions.append(position)
 
-        # Combine vertical and horizontal position
-        if vertical_position == "middle" and horizontal_position == "middle":
-            position = "middle"
-        else:
-            position = vertical_position + horizontal_position
+#     return positions
 
-        positions.append(position)
 
-    return positions
+    
+class PositionEmbeddingSine(nn.Module):
+    """
+    This is a more standard version of the position embedding, very similar to the one
+    used by the Attention is all you need paper, generalized to work on images.
+    """
+    def __init__(self, num_pos_feats=256, temperature=10000, normalize=True, scale=None):
+        super().__init__()
+        self.num_pos_feats = num_pos_feats
+        self.temperature = temperature
+        self.normalize = normalize
+        if scale is not None and normalize is False:
+            raise ValueError("normalize should be True if scale is passed")
+        if scale is None:
+            scale = 2 * math.pi
+        self.scale = scale
+
+    def forward(self, positions):
+        y_embed = positions[:,:,1:]* self.scale
+        x_embed = positions[:,:,:1]* self.scale
+
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=positions.device)
+        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+
+        pos_x = x_embed[:, :, :] / dim_t
+        pos_y = y_embed[:, :, :] / dim_t
+        pos_x = torch.stack((pos_x[:, :,  0::2].sin(), pos_x[:, :,  1::2].cos()), dim=3).flatten(2)
+        pos_y = torch.stack((pos_y[:, :,  0::2].sin(), pos_y[:, :,  1::2].cos()), dim=3).flatten(2)
+        pos = torch.cat((pos_y, pos_x), dim=2)
+        return pos

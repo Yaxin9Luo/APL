@@ -14,14 +14,16 @@ from models.tag_encoder import tag_encoder
 class Net(nn.Module):
     def __init__(self, __C, pretrained_emb, token_size):
         super(Net, self).__init__()
+        
         self.select_num = __C.SELECT_NUM
         self.visual_encoder = visual_encoder(__C).eval()
         self.lang_encoder = language_encoder(__C, pretrained_emb, token_size)
-        self.tag_encoder = tag_encoder(__C, pretrained_emb, token_size)
+        self.tag_encoder = tag_encoder(__C, pretrained_emb, token_size) # 创建tag专用的encoder
         self.linear_vs = nn.Linear(1024, __C.HIDDEN_SIZE)
         self.linear_ts = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
+        self.linear_vs_pos = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE) # 加入visual_position_embedding 专用线性层
         self.linear_tag = nn.Linear(__C.HIDDEN_SIZE,__C.HIDDEN_SIZE) # 创建tag专用的Linear层
-        # self.fusion_layer_concate = nn.Linear(1024,__C.HIDDEN_SIZE) # 创建融合visual和tag特征专用的Linear层,concatenate用的线性层
+        self.soft_weights=nn.Linear(512,3) # 动态加权
         self.head = WeakREChead(__C)
         self.multi_scale_manner = MultiScaleFusion(v_planes=(256, 512, 1024), hiden_planes=1024, scaled=True)
         self.class_num = __C.CLASS_NUM
@@ -63,27 +65,36 @@ class Net(nn.Module):
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new) 
         ###选出筛选过后的锚点的类别，传出那个类别的词索引然后投入encoder。process_yolov3_output在visual encoder文件里面
-        tag_feature = process_yolov3_output(boxes_sml_new[0]) #[64,17,5],4 grid location+1 tag,for example:bottomright,middleright,middleright,bottomright,bottle
-        bssize,sequence,ft = tag_feature.shape
-        tag_feature = tag_feature.view(bssize*sequence,ft) #[64*17,5]
-        tag_feature_ = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
+        tag_feature, position_embedding = process_yolov3_output(boxes_sml_new[0]) #[64,17,1], [64,17,512]
+        bssize,num_anchor,ft = tag_feature.shape
+        __,__,pos = position_embedding.shape
+        tag_feature = tag_feature.view(bssize*num_anchor,ft) #[64*17,1]
+        tag_emb = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
+        # tag_feature_ = self.lang_encoder(tag_feature) #共用lang encoder提取特征 
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
         bs, gridnum, ch = i_new.shape
         i_new = i_new.masked_select(
             torch.zeros(bs, gridnum).to(i_new.device).scatter(1, indices, 1).
                 bool().unsqueeze(2).expand(bs, gridnum,ch)).contiguous().view(bs, selnum, ch)
-
+        language_emb = y_['flat_lang_feat'].unsqueeze(1) #[64, 1, 512]
+        tag_emb = tag_emb['flat_lang_feat'].view(bssize,num_anchor,512) #[64, 17, 512]
         # Anchor-based Contrastive Learning
-        x_new = self.linear_vs(i_new) #[64,17,512]
-        y_new = self.linear_ts(y_['flat_lang_feat'].unsqueeze(1)) #[64,1,512]
-        tag_new = self.linear_tag(tag_feature_['flat_lang_feat'].unsqueeze(1)) # get the tag embedding [1088, 1, 512]
-        tag_new = tag_new.view(bssize,sequence,1,512) #[64,17,1,512]
+        weights = self.soft_weights(language_emb.squeeze(1)) #[64,3]
+        language_emb = self.linear_ts(language_emb) #[64,1,512]
+        # weights = self.soft_weights(language_emb.squeeze(1)) #[64,3]
+        weights= torch.softmax(weights,dim=-1)
+        tag_weight = weights[:,0].unsqueeze(1).unsqueeze(2).expand(-1, 17, 512)#[64,1,1] -> [64,17,512]
+        pos_weight = weights[:,1].unsqueeze(1).unsqueeze(2).expand(-1, 17, 512)#[64,1,1] -> [64,17,512]
+        vis_weight = weights[:,2].unsqueeze(1).unsqueeze(2).expand(-1, 17, 512)#[64,1,1] -> [64,17,512]
+        visual_emb = self.linear_vs(i_new) #[64,17,512]
+        visual_emb = self.linear_vs_pos(visual_emb * vis_weight + position_embedding * pos_weight ) # 给visual也加入position_embedding
+        tag_emb = self.linear_tag(tag_emb * tag_weight  + position_embedding * pos_weight) # tag专用linear层[64, 17, 512]
         if self.training:
-            loss = self.head(x_new, y_new,tag_new) # add tag-text CL
+            loss = self.head(visual_emb, language_emb,tag_emb) # add tag-text CL
             return loss
         else:
-            predictions_s = self.head(x_new, y_new,tag_new) # add tag-text CL
+            predictions_s = self.head(visual_emb, language_emb,tag_emb) # add tag-text CL
             predictions_list = [predictions_s]
             box_pred = get_boxes(boxes_sml_new, predictions_list,self.class_num)
             return box_pred
@@ -107,3 +118,4 @@ def get_boxes(boxes_sml, predictionslist,class_num):
     ind_new = ind.unsqueeze(1).unsqueeze(1).repeat(1, 1, 5)
     box_new = torch.gather(boxes, 1, ind_new)
     return box_new
+

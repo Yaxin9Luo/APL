@@ -4,11 +4,11 @@ import torch.nn as nn
 
 
 def getContrast(vis_emb, lan_emb, tag_emb, a = 0.8):
-    # vis_emb.shape = [64,17,512], lan_emb.shape = [64,1,512], tag_emb = [64,17,1,512]
+    # vis_emb.shape = [64,17,512], lan_emb.shape = [64,1,512], tag_emb = [64,17,512]
     #text-visual
     sim_map_vis = torch.einsum('avd, bqd -> baqv',vis_emb,lan_emb) #[64,64,1,17]
     #tag-text
-    sim_map_tag = torch.einsum('azvd, bqd -> baqz',tag_emb,lan_emb) #[64,64,1,17]
+    sim_map_tag = torch.einsum('avd, bqd -> baqv',tag_emb,lan_emb) #[64,64,1,17]
     
     sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
     batchsize = sim_map.shape[0]
@@ -29,7 +29,7 @@ def getPrediction(vis_emb, lan_emb, tag_emb, a = 0.8):
     # 计算视觉特征和语言特征之间的相似度
     sim_map_vis = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)  
     # 计算标签特征和语言特征之间的相似度
-    sim_map_tag = torch.einsum('bkd, bzyd -> byz', lan_emb, tag_emb) 
+    sim_map_tag = torch.einsum('bkd, byd -> byk', tag_emb, lan_emb) 
     
     sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
 
