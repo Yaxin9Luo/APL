@@ -67,10 +67,9 @@ class Net(nn.Module):
         ###选出筛选过后的锚点的类别，传出那个类别的词索引然后投入encoder。process_yolov3_output在visual encoder文件里面
         tag_feature, position_embedding = process_yolov3_output(boxes_sml_new[0]) #[64,17,1], [64,17,512]
         bssize,num_anchor,ft = tag_feature.shape
-        __,__,pos = position_embedding.shape
         tag_feature = tag_feature.view(bssize*num_anchor,ft) #[64*17,1]
         tag_emb = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
-        # tag_feature_ = self.lang_encoder(tag_feature) #共用lang encoder提取特征 
+        # tag_emb = self.lang_encoder(tag_feature) #共用lang encoder提取特征 
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
         bs, gridnum, ch = i_new.shape
@@ -84,12 +83,9 @@ class Net(nn.Module):
         language_emb = self.linear_ts(language_emb) #[64,1,512]
         # weights = self.soft_weights(language_emb.squeeze(1)) #[64,3]
         weights= torch.softmax(weights,dim=-1)
-        tag_weight = weights[:,0].unsqueeze(1).unsqueeze(2).expand(-1, 17, 512)#[64,1,1] -> [64,17,512]
-        pos_weight = weights[:,1].unsqueeze(1).unsqueeze(2).expand(-1, 17, 512)#[64,1,1] -> [64,17,512]
-        vis_weight = weights[:,2].unsqueeze(1).unsqueeze(2).expand(-1, 17, 512)#[64,1,1] -> [64,17,512]
         visual_emb = self.linear_vs(i_new) #[64,17,512]
-        visual_emb = self.linear_vs_pos(visual_emb * vis_weight + position_embedding * pos_weight ) # 给visual也加入position_embedding
-        tag_emb = self.linear_tag(tag_emb * tag_weight  + position_embedding * pos_weight) # tag专用linear层[64, 17, 512]
+        visual_emb = self.linear_vs_pos(visual_emb * weights[:,0,None,None] + position_embedding * weights[:,1,None,None]  ) # 给visual也加入position_embedding
+        tag_emb = self.linear_tag(tag_emb * weights[:,2,None,None] + position_embedding * weights[:,1,None,None]) # tag专用linear层[64, 17, 512]
         if self.training:
             loss = self.head(visual_emb, language_emb,tag_emb) # add tag-text CL
             return loss

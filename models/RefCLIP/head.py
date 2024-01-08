@@ -3,13 +3,12 @@ import torch
 import torch.nn as nn
 
 
-def getContrast(vis_emb, lan_emb, tag_emb, a = 0.8):
+def getContrast(vis_emb, lan_emb, tag_emb, a):
     # vis_emb.shape = [64,17,512], lan_emb.shape = [64,1,512], tag_emb = [64,17,512]
     #text-visual
     sim_map_vis = torch.einsum('avd, bqd -> baqv',vis_emb,lan_emb) #[64,64,1,17]
     #tag-text
     sim_map_tag = torch.einsum('avd, bqd -> baqv',tag_emb,lan_emb) #[64,64,1,17]
-    
     sim_map= a*sim_map_vis+ (1-a)*sim_map_tag
     batchsize = sim_map.shape[0]
     max_sims,_ = sim_map.topk(k=2, dim=-1, largest=True, sorted=True)
@@ -25,7 +24,7 @@ def getContrast(vis_emb, lan_emb, tag_emb, a = 0.8):
     loss = nn.CrossEntropyLoss(reduction="mean")(new_logits, target_pred)
     return loss
 
-def getPrediction(vis_emb, lan_emb, tag_emb, a = 0.8):
+def getPrediction(vis_emb, lan_emb, tag_emb, a):
     # 计算视觉特征和语言特征之间的相似度
     sim_map_vis = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)  
     # 计算标签特征和语言特征之间的相似度
@@ -43,13 +42,15 @@ def getPrediction(vis_emb, lan_emb, tag_emb, a = 0.8):
 class WeakREChead(nn.Module):
     def __init__(self, __C):
         super(WeakREChead, self).__init__()
+        self.a = nn.Parameter(torch.tensor(0.8))
 
     def forward(self, fusion_fs,lan_fs, tag_fs):
+        a = torch.sigmoid(self.a)
         if self.training:
-            loss = getContrast(fusion_fs, lan_fs, tag_fs)
+            loss = getContrast(fusion_fs, lan_fs, tag_fs, a)
             return loss
         else:
-            predictions = getPrediction(fusion_fs, lan_fs, tag_fs)
+            predictions = getPrediction(fusion_fs, lan_fs, tag_fs, a)
             return predictions
 
 
