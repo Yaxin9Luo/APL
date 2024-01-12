@@ -41,7 +41,6 @@ class LSTM_SA(nn.Module):
             for param in module.parameters():
                 param.requires_grad = False
     def forward(self, ques_ix):
-
         # Pre-process Language Feature
         lang_feat_mask = make_mask(ques_ix.unsqueeze(2))
         lang_feat = self.embedding(ques_ix)

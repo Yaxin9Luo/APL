@@ -2,19 +2,21 @@
 
 import torch
 import torch.nn as nn
-
+import numpy as np
 from models.language_encoder import language_encoder
 from models.visual_encoder import visual_encoder , process_yolov3_output
 from models.RefCLIP.head import WeakREChead
 from models.network_blocks import MultiScaleFusion
 from models.tag_encoder import tag_encoder
-
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from collections import Counter
 
 
 class Net(nn.Module):
     def __init__(self, __C, pretrained_emb, token_size):
         super(Net, self).__init__()
-        
+        self.color_indices = torch.tensor([6, 13, 231, 43, 191, 369, 194, 52, 110, 80, 125, 778, 673])
         self.select_num = __C.SELECT_NUM
         self.visual_encoder = visual_encoder(__C).eval()
         self.lang_encoder = language_encoder(__C, pretrained_emb, token_size)
@@ -40,7 +42,6 @@ class Net(nn.Module):
                 param.requires_grad = False
 
     def forward(self, x, y):
-
         # Vision and Language Encoding
         with torch.no_grad():
             boxes_all, x_, boxes_sml = self.visual_encoder(x)
@@ -65,11 +66,12 @@ class Net(nn.Module):
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new) 
         ###选出筛选过后的锚点的类别，传出那个类别的词索引然后投入encoder。process_yolov3_output在visual encoder文件里面
-        tag_feature, position_embedding = process_yolov3_output(boxes_sml_new[0]) #[64,17,1], [64,17,512]
+        tag_feature, position_embedding = process_yolov3_output(boxes_sml_new[0],x) #[64,17,1], [64,17,512]
         bssize,num_anchor,ft = tag_feature.shape
         tag_feature = tag_feature.view(bssize*num_anchor,ft) #[64*17,1]
         tag_emb = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
-        # tag_emb = self.lang_encoder(tag_feature) #共用lang encoder提取特征 
+        # with torch.no_grad():
+        #     tag_emb = self.lang_encoder(tag_feature) #共用lang encoder提取特征,freeze encoder
         batchsize, dim, h, w = x_[0].size()
         i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
         bs, gridnum, ch = i_new.shape
@@ -79,13 +81,15 @@ class Net(nn.Module):
         language_emb = y_['flat_lang_feat'].unsqueeze(1) #[64, 1, 512]
         tag_emb = tag_emb['flat_lang_feat'].view(bssize,num_anchor,512) #[64, 17, 512]
         # Anchor-based Contrastive Learning
-        weights = self.soft_weights(language_emb.squeeze(1)) #[64,3]
         language_emb = self.linear_ts(language_emb) #[64,1,512]
-        # weights = self.soft_weights(language_emb.squeeze(1)) #[64,3]
-        weights= torch.softmax(weights,dim=-1)
         visual_emb = self.linear_vs(i_new) #[64,17,512]
-        visual_emb = self.linear_vs_pos(visual_emb * weights[:,0,None,None] + position_embedding * weights[:,1,None,None]  ) # 给visual也加入position_embedding
-        tag_emb = self.linear_tag(tag_emb * weights[:,2,None,None] + position_embedding * weights[:,1,None,None]) # tag专用linear层[64, 17, 512]
+        weights = self.soft_weights(visual_emb+tag_emb+position_embedding) #[64,3] weights 用visual+tag+pos一起算
+        weights= torch.softmax(weights,dim=-1) # weights 用visual+tag+pos一起算
+        visual_emb = self.linear_vs_pos(visual_emb * weights[:,:,0,None]+ position_embedding * weights[:,:,1,None])+ \
+            self.linear_tag(tag_emb * weights[:,:,2,None]+ position_embedding * weights[:,:,1,None]) # 
+        # with torch.no_grad():
+        #     tag_emb = self.linear_ts(tag_emb + position_embedding) #共用lang linear,freeze
+        # tag_emb = self.linear_tag(tag_emb + position_embedding) # tag_emb 单独的linear层
         if self.training:
             loss = self.head(visual_emb, language_emb,tag_emb) # add tag-text CL
             return loss
@@ -94,7 +98,6 @@ class Net(nn.Module):
             predictions_list = [predictions_s]
             box_pred = get_boxes(boxes_sml_new, predictions_list,self.class_num)
             return box_pred
-
 
 def get_boxes(boxes_sml, predictionslist,class_num):
     batchsize = predictionslist[0].size()[0]
