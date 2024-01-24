@@ -3,7 +3,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import torch.nn.functional as F
 from models.language_encoder import language_encoder
+# from models.language_decoder import language_decoder
 from models.visual_encoder import visual_encoder , process_yolov3_output
 from models.RefCLIP.head import WeakREChead
 from models.network_blocks import MultiScaleFusion
@@ -21,11 +23,18 @@ class Net(nn.Module):
         self.visual_encoder = visual_encoder(__C).eval()
         self.lang_encoder = language_encoder(__C, pretrained_emb, token_size)
         self.tag_encoder = tag_encoder(__C, pretrained_emb, token_size) # 创建tag专用的encoder
+        # self.lang_decoder = language_decoder(__C)
+        self.linear_decoder = nn.Sequential(
+            nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE),
+            nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE),
+            nn.ReLU(),
+        )
         self.linear_vs = nn.Linear(1024, __C.HIDDEN_SIZE)
         self.linear_ts = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
         self.linear_vs_pos = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE) # 加入visual_position_embedding 专用线性层
         self.linear_tag = nn.Linear(__C.HIDDEN_SIZE,__C.HIDDEN_SIZE) # 创建tag专用的Linear层
-        self.soft_weights=nn.Linear(512,3) # 动态加权
+        self.soft_weights=nn.Linear(512,2) # 动态加权
+        self.gumbel_softmax = F.gumbel_softmax
         self.head = WeakREChead(__C)
         self.multi_scale_manner = MultiScaleFusion(v_planes=(256, 512, 1024), hiden_planes=1024, scaled=True)
         self.class_num = __C.CLASS_NUM
@@ -66,7 +75,7 @@ class Net(nn.Module):
                 3).expand(bs, gridnum, anncornum, ch)).contiguous().view(bs, selnum, anncornum, ch)
         boxes_sml_new.append(box_sml_new) 
         ###选出筛选过后的锚点的类别，传出那个类别的词索引然后投入encoder。process_yolov3_output在visual encoder文件里面
-        tag_feature, position_embedding = process_yolov3_output(boxes_sml_new[0],x) #[64,17,1], [64,17,512]
+        tag_feature, position_embedding = process_yolov3_output(boxes_sml_new[0],x) #[64,17,2], [64,17,512]
         bssize,num_anchor,ft = tag_feature.shape
         tag_feature = tag_feature.view(bssize*num_anchor,ft) #[64*17,1]
         tag_emb = self.tag_encoder(tag_feature) #用专门的tag encoder提取特征
@@ -82,19 +91,21 @@ class Net(nn.Module):
         tag_emb = tag_emb['flat_lang_feat'].view(bssize,num_anchor,512) #[64, 17, 512]
         # Anchor-based Contrastive Learning
         language_emb = self.linear_ts(language_emb) #[64,1,512]
-        visual_emb = self.linear_vs(i_new) #[64,17,512]
-        weights = self.soft_weights(visual_emb+tag_emb+position_embedding) #[64,3] weights 用visual+tag+pos一起算
-        weights= torch.softmax(weights,dim=-1) # weights 用visual+tag+pos一起算
-        visual_emb = self.linear_vs_pos(visual_emb * weights[:,:,0,None]+ position_embedding * weights[:,:,1,None])+ \
-            self.linear_tag(tag_emb * weights[:,:,2,None]+ position_embedding * weights[:,:,1,None]) # 
-        # with torch.no_grad():
-        #     tag_emb = self.linear_ts(tag_emb + position_embedding) #共用lang linear,freeze
-        # tag_emb = self.linear_tag(tag_emb + position_embedding) # tag_emb 单独的linear层
+        visual_emb = self.linear_vs(i_new) #[64,17,512]        
+        # Dynamic Weighted Fusion
+        weights = self.soft_weights(visual_emb + tag_emb + position_embedding) #[64,17,2] weights 用visual+tag一起算,
+        weights= torch.softmax(weights/0.1,dim=-1) # softmax normalize        
+        visual_emb = self.linear_vs_pos(visual_emb * weights[:,:,0,None]) + \
+            self.linear_tag(tag_emb * weights[:,:,1,None] ) + position_embedding 
+        # reconstruct the language embedding from the visual embedding and add reconstruction loss
+        recon_lang_emb = self.linear_decoder(visual_emb) # [64,17,512]
+        recon_loss = reconstruction_loss(recon_lang_emb, language_emb.detach())
+        loss_a = 0.9
         if self.training:
-            loss = self.head(visual_emb, language_emb,tag_emb) # add tag-text CL
+            loss = loss_a * self.head(visual_emb, language_emb) + (1-loss_a) * recon_loss
             return loss
         else:
-            predictions_s = self.head(visual_emb, language_emb,tag_emb) # add tag-text CL
+            predictions_s = self.head(visual_emb, language_emb)
             predictions_list = [predictions_s]
             box_pred = get_boxes(boxes_sml_new, predictions_list,self.class_num)
             return box_pred
@@ -118,3 +129,17 @@ def get_boxes(boxes_sml, predictionslist,class_num):
     box_new = torch.gather(boxes, 1, ind_new)
     return box_new
 
+class DynamicWeightGenerator(nn.Module):
+    def __init__(self,din,dout,dw):
+        super(DynamicWeightGenerator, self).__init__()
+        self.W0 = nn.Parameter(torch.randn(dw, dout))
+        self.P = nn.Parameter(torch.randn(dout, dw))
+        self.Q = nn.Parameter(torch.randn(din, dw))
+        self.fc = nn.Linear(512, 512)  # Fully connected layer for dynamic matrix
+    def forward(self, linguistic_features):
+        dynamic_matrix = self.fc(linguistic_features) # torch.Size([64, 1, 512])
+        dynamic_weights = self.W0 + torch.transpose(torch.matmul(self.P, torch.matmul(dynamic_matrix, self.Q).squeeze(1)),0,1)
+        return dynamic_weights
+    
+def reconstruction_loss(generated_lang_emb, original_lang_emb):
+    return F.mse_loss(generated_lang_emb, original_lang_emb)

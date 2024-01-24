@@ -353,7 +353,7 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     mapped_colors = []
     # Iterate through the color_words list and map each color word to its corresponding label in color_dict
     for color_word in color_words:
-        mapped_color_label = color_dict.get(color_word, 1)  # Use -1 as a default value if color is not found
+        mapped_color_label = color_dict.get(color_word, 1)  
         mapped_colors.append(mapped_color_label)
     # Convert the list of mapped color labels to a tensor
     mapped_colors_tensor = torch.tensor(mapped_colors).view(im_num,bbox_num,tag_num).to(device)
