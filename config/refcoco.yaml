@@ -9,6 +9,7 @@ MODEL:
   FF_SIZE: 2048
   FLAT_GLIMPSES: 1
   LANG_ENC: 'lstm'
+  LANG_DEC: 'lstm'
   TAG_ENC: 'tag'
   N_SA: 3
   VIS_ENC: 'yolov3'
@@ -17,7 +18,7 @@ MODEL:
   CLASS_NUM: 80
 
 TRAIN:
-  GPU: [6]
+  GPU: [1]
   BATCH_SIZE: 64 # total batch size on a single node if multiprocessing_distributed else batch size on one gpu
   NUM_WORKER: 8 # same as BATCH_SIZE
   LR: 0.0001

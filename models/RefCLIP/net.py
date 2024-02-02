@@ -26,8 +26,8 @@ class Net(nn.Module):
         # self.lang_decoder = language_decoder(__C)
         self.linear_decoder = nn.Sequential(
             nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE),
-            nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE),
             nn.ReLU(),
+            nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
         )
         self.linear_vs = nn.Linear(1024, __C.HIDDEN_SIZE)
         self.linear_ts = nn.Linear(__C.HIDDEN_SIZE, __C.HIDDEN_SIZE)
@@ -94,13 +94,13 @@ class Net(nn.Module):
         visual_emb = self.linear_vs(i_new) #[64,17,512]        
         # Dynamic Weighted Fusion
         weights = self.soft_weights(visual_emb + tag_emb + position_embedding) #[64,17,2] weights 用visual+tag一起算,
-        weights= torch.softmax(weights/0.1,dim=-1) # softmax normalize        
+        weights= torch.softmax(weights/0.09,dim=-1) # softmax normalize        
         visual_emb = self.linear_vs_pos(visual_emb * weights[:,:,0,None]) + \
             self.linear_tag(tag_emb * weights[:,:,1,None] ) + position_embedding 
         # reconstruct the language embedding from the visual embedding and add reconstruction loss
         recon_lang_emb = self.linear_decoder(visual_emb) # [64,17,512]
         recon_loss = reconstruction_loss(recon_lang_emb, language_emb.detach())
-        loss_a = 0.9
+        loss_a = 0.8
         if self.training:
             loss = loss_a * self.head(visual_emb, language_emb) + (1-loss_a) * recon_loss
             return loss

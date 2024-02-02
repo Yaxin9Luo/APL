@@ -243,7 +243,7 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     # image = cv2.imread(image_path)
     # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     # 80类物体名称在dataloader.py中函数token_to_ix， 调用一下print出来当成常量
-    cats = json.load(open('/hdd1/Improve_RefCLIP/data/anns/cat_name.json', 'r'))
+    cats = json.load(open('/data/luogen/Improve_RefCLIP/data/anns/cat_name.json', 'r'))
     cats = list(cats.values()) # 80类物体名称
     tokenizer_index = [proc_ref(token_to_ix, i, max_token=2) for i in cats]# tokenizer_index = [[10244, 12312]，...] #这个index是language encoder能识别的, 80维，长度为2    
     tokenizer_index = [list(index) for index in tokenizer_index]
