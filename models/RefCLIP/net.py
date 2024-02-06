@@ -94,21 +94,23 @@ class Net(nn.Module):
         visual_emb = self.linear_vs(i_new) #[64,17,512]        
         # Dynamic Weighted Fusion
         weights = self.soft_weights(visual_emb + tag_emb + position_embedding) #[64,17,2] weights 用visual+tag一起算,
-        weights= torch.softmax(weights/0.09,dim=-1) # softmax normalize        
+        logsoftmax = nn.LogSoftmax(dim=-1)
+        weights= logsoftmax(weights/0.03) # softmax normalize       
         visual_emb = self.linear_vs_pos(visual_emb * weights[:,:,0,None]) + \
             self.linear_tag(tag_emb * weights[:,:,1,None] ) + position_embedding 
         # reconstruct the language embedding from the visual embedding and add reconstruction loss
-        recon_lang_emb = self.linear_decoder(visual_emb) # [64,17,512]
-        recon_loss = reconstruction_loss(recon_lang_emb, language_emb.detach())
-        loss_a = 0.8
+        # loss_a = 0.8
         if self.training:
-            loss = loss_a * self.head(visual_emb, language_emb) + (1-loss_a) * recon_loss
-            return loss
+            contrastive_loss,max_sim_vis_emb = self.head(visual_emb, language_emb)
+            # recon_lang_emb = self.linear_decoder(max_sim_vis_emb)
+            # recon_loss = reconstruction_loss(recon_lang_emb, language_emb.detach())
+            # total_loss = loss_a * contrastive_loss + (1-loss_a) * recon_loss
+            return contrastive_loss
         else:
-            predictions_s = self.head(visual_emb, language_emb)
+            predictions_s, similiarity_score = self.head(visual_emb, language_emb)
             predictions_list = [predictions_s]
             box_pred = get_boxes(boxes_sml_new, predictions_list,self.class_num)
-            return box_pred
+            return box_pred,similiarity_score
 
 def get_boxes(boxes_sml, predictionslist,class_num):
     batchsize = predictionslist[0].size()[0]
@@ -128,18 +130,6 @@ def get_boxes(boxes_sml, predictionslist,class_num):
     ind_new = ind.unsqueeze(1).unsqueeze(1).repeat(1, 1, 5)
     box_new = torch.gather(boxes, 1, ind_new)
     return box_new
-
-class DynamicWeightGenerator(nn.Module):
-    def __init__(self,din,dout,dw):
-        super(DynamicWeightGenerator, self).__init__()
-        self.W0 = nn.Parameter(torch.randn(dw, dout))
-        self.P = nn.Parameter(torch.randn(dout, dw))
-        self.Q = nn.Parameter(torch.randn(din, dw))
-        self.fc = nn.Linear(512, 512)  # Fully connected layer for dynamic matrix
-    def forward(self, linguistic_features):
-        dynamic_matrix = self.fc(linguistic_features) # torch.Size([64, 1, 512])
-        dynamic_weights = self.W0 + torch.transpose(torch.matmul(self.P, torch.matmul(dynamic_matrix, self.Q).squeeze(1)),0,1)
-        return dynamic_weights
     
 def reconstruction_loss(generated_lang_emb, original_lang_emb):
     return F.mse_loss(generated_lang_emb, original_lang_emb)
