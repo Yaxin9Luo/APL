@@ -1,19 +1,31 @@
 # coding=utf-8
-
+import time
 import numpy as np
 import torch
 import torch.nn as nn
 from models.network_blocks import add_conv,DropBlock,FeatureAdaption,resblock,SPPLayer,upsample
 import json
-from PIL import Image, ImageDraw, ImageFont
 import cv2
 import math
 from sklearn.cluster import KMeans
 from collections import Counter
-from colormath.color_objects import LabColor, sRGBColor
-from colormath.color_diff import delta_e_cie1976
-from colormath.color_conversions import convert_color
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans, MiniBatchKMeans
+import requests
+from PIL import Image
+class CooP(nn.Module):
+    def __init__(self, visual_feature_size, prompt_size):
+        super(CooP, self).__init__()
+        # Define layers for prompt generation here
+        self.linear1 = nn.Linear(visual_feature_size, prompt_size)
+        self.activation = nn.ReLU()
+        self.linear2 = nn.Linear(prompt_size, prompt_size)
 
+    def forward(self, visual_features):
+        prompt = self.linear1(visual_features)
+        prompt = self.activation(prompt)
+        prompt = self.linear2(prompt)
+        return prompt
 class YOLOv3Head(nn.Module):
     def __init__(self, anch_mask, n_classes, stride, in_ch=1024, ignore_thre=0.7, label_smooth = False, rfb=False, sep=False):
         super(YOLOv3Head, self).__init__()
@@ -235,14 +247,7 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     'black': 110,
     'white': 80,
     'pink': 125,
-    'maroon': 778,
-    'turquoise': 673
     }
-    # ## 加载图像可视化用
-    # image_path = '/hdd1/Improve_RefCLIP/data/images/train2014/COCO_train2014_000000581657.jpg'
-    # image = cv2.imread(image_path)
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    # 80类物体名称在dataloader.py中函数token_to_ix， 调用一下print出来当成常量
     cats = json.load(open('/data/luogen/Improve_RefCLIP/data/anns/cat_name.json', 'r'))
     cats = list(cats.values()) # 80类物体名称
     tokenizer_index = [proc_ref(token_to_ix, i, max_token=2) for i in cats]# tokenizer_index = [[10244, 12312]，...] #这个index是language encoder能识别的, 80维，长度为2    
@@ -250,35 +255,6 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     tokenizer_index=torch.tensor(tokenizer_index,device=device,dtype=torch.long) #形状 [80,2]
     class_probs = yolov3_output[..., 5:].mean(2)  # 获取类别概率 形状：[64, 17, 4, 80]->[64, 17, 80] 每个grid的物体概率取平均
     _, topk_class_indices = torch.max(class_probs, dim=-1)  # 计算最大类别概率的索引，形状：[64, 17]
-    
-    ### 可视化用
-    # sample_boxes = yolov3_output[0, ... ,0:5].mean(2)
-    # sample_boxes = sample_boxes.cpu().numpy() #[17,4]
-    # # 将索引映射到类别名称
-    # sample_class_probs = topk_class_indices[0, :]  # 形状：[17]
-    # sample_class_probs = sample_class_probs.cpu().numpy()
-    # predicted_classes = [cats[idx] for idx in sample_class_probs]
-    # print(predicted_classes)
-    # exit()
-    # ## 绘制边界框和类别标签可视化用
-    # for i, label in zip(range(sample_boxes.shape[0]),predicted_classes):
-    #     # 提取坐标
-    #     x_center, y_center, width, height = sample_boxes[i]
-    #     x_min = int(x_center - (width / 2))
-    #     y_min = int(y_center - (height / 2))
-    #     x_max = int(x_center + (width / 2))
-    #     y_max = int(y_center + (height / 2))
-    #     # 绘制边界框
-    #     cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
-    #     # 绘制类别标签
-    #     cv2.putText(image, label, (x_min, y_min), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    # # 转换颜色空间回 RGB 以便于 PIL 处理
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    # # 使用 PIL 显示图像
-    # image_pil = Image.fromarray(image)
-    # # 保存图像
-    # image_pil.save('/hdd1/Improve_RefCLIP/debug_image.jpg')
-    # exit()
     
     # 将索引映射到类别名称
     sample_class_probs = topk_class_indices # 形状：[64，17]
@@ -291,15 +267,16 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     bbox = yolov3_output[..., :2].mean(2)  # [64, 17, 2] bbox midpoints [batch, num_anchors, x_center, y_center]
     im_num,bbox_num,tag_num = predicted_indices_tensor.shape
     
-    ### 加入position embedding from class PositionEmbeddingSine
+    ########## 加入position embedding from class PositionEmbeddingSine ############
     pos_encoder = PositionEmbeddingSine()
     image_size = 416.0
     scaled_bbox = bbox / image_size  # Normalize coordinates to [0, 1]
-    position_embeddings = pos_encoder(scaled_bbox) # 第二种 position class实现方法
+    position_embeddings = pos_encoder(scaled_bbox) 
+    ##############################################################################
+    
     bbox_data = yolov3_output[..., :4].mean(2).reshape(-1,4) # [64, 17, 4]
     
-    
-    # # 获取box坐标 加入位置单词
+    ########################### 获取box坐标 加入位置单词 #############################
     # # Calculate midpoints, widths, and heights for all bounding boxes
     # midpoints = bbox_data[:, :2]  # boxes' midpoints [x_center, y_center]
     # # Process all bounding boxes in the batch to determine their positions
@@ -308,7 +285,7 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     # position_indices = [token_to_ix.get(position, token_to_ix['UNK']) for position in positions]
     # position_indices_tensor = torch.tensor(position_indices, device=device, dtype=torch.long)
     # position_indices_tensor = position_indices_tensor.view(yolov3_output.shape[0], yolov3_output.shape[1], predicted_indices_tensor.shape[2])
-    
+    ###############################################################################
     
     ##抽取锚点的颜色信息
     # Convert midpoints and dimensions to corner coordinates
@@ -320,8 +297,7 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     # Normalize coordinates to the range of the image dimensions
     _, _, img_height, img_width = image_tensor.shape
     normalized_bbox = normalize_coordinates(bbox_corners, img_width, img_height)
-    average_colors = torch.abs(calculate_average_color(unnormalize_image_tensor, normalized_bbox))
-    # unnormalized_colors = torch.abs(unnormalize(average_colors, mean, std))
+    dominant_colors = torch.abs(calculate_average_color(unnormalize_image_tensor, normalized_bbox))
     # Flatten the average_colors tensor
     color_mapping = {
     (0.0, 0.0, 1.0): "blue",        # Pure Blue
@@ -338,14 +314,16 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     (0.5, 0.0, 0.0): "maroon",     # Maroon (A dark Red)
     (0.0, 1.0, 1.0): "turquoise",  # Turquoise (A blue-green color)
     }
-    color_mapping = {torch.tensor(rgb).to(average_colors.device): color for rgb, color in color_mapping.items()}
+    color_mapping = {torch.tensor(rgb).to(dominant_colors.device): color for rgb, color in color_mapping.items()}
+
+
 
     # Initialize an empty list to store color words
     color_words = []
     # Iterate through each color in the flattened tensor
-    for color in average_colors:
+    for color in dominant_colors:
     # Find the closest RGB values in the color_mapping dictionary
-        closest_match = min(color_mapping.keys(), key=lambda x: torch.dist(color, torch.tensor(x).to(color.device)))
+        closest_match = min(color_mapping.keys(), key=lambda x: torch.dist(color, x))
     # Map the closest RGB values to the corresponding color word
         color_word = color_mapping[closest_match]
         color_words.append(color_word)
@@ -358,22 +336,44 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     # Convert the list of mapped color labels to a tensor
     mapped_colors_tensor = torch.tensor(mapped_colors).view(im_num,bbox_num,tag_num).to(device)
 
+    ### Next 2 lines below are only for KMeans
+    # mapped_colors_tensor = torch.tensor(mapped_colors).to(device)
+    # mapped_colors_tensor_unsqueezed = mapped_colors_tensor.unsqueeze(1)
+    # mapped_colors_tensor = mapped_colors_tensor_unsqueezed.expand(-1, 17)
+    # mapped_colors_tensor = mapped_colors_tensor.view(im_num,bbox_num,tag_num)
+    ############################################################################
 
-    combined_indices = torch.cat((mapped_colors_tensor,predicted_indices_tensor), dim=-1)# [64, 17, 2]
-
-    # ## 打印一下加入位置信息之后的tag词语是什么样，检查检查
-    # # Step 1: Inverse Mapping
-    # ix_to_token = {v: k for k, v in token_to_ix.items()}
-    # # Step 2: Convert Tensor Indices to Words
-    # combined_indices_cpu = combined_indices.cpu().numpy()
-    # combined_words = [[[ix_to_token.get(index, 'UNK') for index in anchor] for anchor in batch] for batch in combined_indices_cpu]
-    # # Step 3: Construct Readable Format
-    # formatted_output = [' | '.join([' '.join(anchor) for anchor in batch]) for batch in combined_words]
-    # # Step 4: Print for Verification
-    # for i, batch_output in enumerate(formatted_output[:]):  # Print first 5 batches
-    #     print(f"Batch {i}: {batch_output}\n")
-    # exit()
-    return combined_indices, position_embeddings
+    # Combine with predicted_indices_tensor (ensure it's on the same device)
+    # combined_indices = torch.cat((mapped_colors_tensor, predicted_indices_tensor), dim=-1)# [64, 17, 2]
+    
+    # ### 可视化一波检查一下颜色对不对
+    # ix_to_token = {ix: token for token, ix in token_to_ix.items()}
+    # annotations = indices_to_words(combined_indices, ix_to_token) 
+    # image_path = '/data/luogen/Improve_RefCLIP/data/images/train2014/COCO_train2014_000000226176.jpg' # 加载图像可视化用
+    # image = cv2.imread(image_path)
+    # sample_boxes = yolov3_output[0, ... ,0:5].mean(2)
+    # sample_boxes = sample_boxes.cpu().numpy() #[17,4]
+    # # # 将索引映射到类别名称
+    # # ## 绘制边界框和类别标签可视化用
+    # for i, label in zip(range(sample_boxes.shape[0]),annotations[0]):
+    #     # 提取坐标
+    #     x_center, y_center, width, height = sample_boxes[i]
+    #     x_min = int(x_center - (width / 2))
+    #     y_min = int(y_center - (height / 2))
+    #     x_max = int(x_center + (width / 2))
+    #     y_max = int(y_center + (height / 2))
+    #     # 绘制边界框
+    #     cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
+    #     # 绘制类别标签
+    #     cv2.putText(image, label, (x_min, y_min), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    # # 转换颜色空间回 RGB 以便于 PIL 处理
+    # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # # 使用 PIL 显示图像
+    # image_pil = Image.fromarray(image)
+    # # 保存图像
+    # image_pil.save('/data/luogen/Improve_RefCLIP/debug_image.jpg') 
+    
+    return mapped_colors_tensor,position_embeddings
     
     
 def proc_ref(token_to_ix,cat, max_token=2):
@@ -396,6 +396,111 @@ def proc_ref(token_to_ix,cat, max_token=2):
 
         return ques_ix
     
+###一系列提取颜色信息的function
+def unnormalize(tensor, mean, std):
+    """ Reverses the normalization on a tensor. """
+    # Clone the tensor to avoid changing the original
+    newtensor = tensor.clone()
+    for t, m, s in zip(newtensor, mean, std):
+        t.mul_(s).add_(m)
+    return newtensor
+def bbox_midpoint_to_corners(bbox_data):
+    # Convert from midpoint (x, y) and (width, height) to (x1, y1, x2, y2)
+    x_center, y_center, width, height = bbox_data[..., 0], bbox_data[..., 1], bbox_data[..., 2], bbox_data[..., 3]
+    x1 = x_center - width / 2
+    y1 = y_center - height / 2
+    x2 = x_center + width / 2
+    y2 = y_center + height / 2
+    return torch.stack([x1, y1, x2, y2], dim=-1)
+def normalize_coordinates(bbox, image_width, image_height):
+    bbox[..., [0, 2]] = torch.clamp(bbox[..., [0, 2]] / image_width, 0, 1)   # x1, x2
+    bbox[..., [1, 3]] = torch.clamp(bbox[..., [1, 3]] / image_height, 0, 1)  # y1, y2
+    return bbox
+# def calculate_color(image_tensor, bbox):
+#     #image_tensor: b,c,h,w
+#     #bbox: b,17,4
+#     device = image_tensor.device
+#     b, _, img_height, img_width = image_tensor.shape
+#     bbox_scaled = bbox * torch.tensor([img_width, img_height, img_width, img_height], device=device)
+#     bbox_scaled = bbox_scaled.long()
+#     bbox_scaled=bbox_scaled.view(b,17,4)
+#     dominant_colors = []
+#     for i,boxes in enumerate(bbox_scaled):
+#             # Calculate area of each box: (x2 - x1) * (y2 - y1)
+#             areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+#             # Find the index of the box with the largest area
+#             largest_box_index = torch.argmax(areas).item()
+#             # Select the box with the largest area
+#             largest_box = boxes[largest_box_index]
+#             x1, y1, x2, y2 = largest_box
+#             region = image_tensor[i, :, y1:y2, x1:x2] #
+#             # Reshape the region for Kmeans,shape: (num_pixels, num_channels)
+#             pixels = region.permute(1, 2, 0).reshape(-1, 3).cpu().numpy()
+#             # Apply KMeans clustering
+#             clt = MiniBatchKMeans(n_clusters=3, max_iter=4000, init='k-means++',  batch_size=1024, n_init=10)
+#             clt.fit(pixels)
+#             # Compute the histogram of the number of pixels assigned to each cluster
+#             numLabels = np.arange(0, len(np.unique(clt.labels_)) + 1)
+#             (hist, _) = np.histogram(clt.labels_, bins=numLabels)
+#             # Normalize the histogram to get a frequency distribution
+#             hist = hist.astype("float")
+#             hist /= hist.sum()
+#             # Pair each cluster center with its frequency
+#             colors = sorted(zip(hist, clt.cluster_centers_), key=lambda x: x[0], reverse=True)
+#             # Extract the most dominant color
+#             dominant_color = colors[0][1]
+#             dominant_colors.append(torch.tensor(dominant_color, dtype=torch.float32, device=device))
+#     return torch.stack(dominant_colors).to(device)
+def calculate_average_color(image_tensor, bbox):
+    # image_tensor: b,c,h,w
+    # bbox: b,17,4
+    device = image_tensor.device
+    b, _, img_height, img_width = image_tensor.shape
+    bbox_scaled = bbox * torch.tensor([img_width, img_height, img_width, img_height], device=bbox.device)
+    bbox_scaled = bbox_scaled.long()
+    bbox_scaled = bbox_scaled.view(b, 17, 4)
+    colors = []
+    for i, boxes in enumerate(bbox_scaled):
+        for box in boxes:
+            x1, y1, x2, y2 = box
+            region = image_tensor[i, :, y1:y2, x1:x2]  # Extract region
+            average_color = region.reshape(3, -1).mean(dim=1)
+            colors.append(average_color)
+    return torch.stack(colors).to(device)
+
+# def calculate_histogram_peak_color(image_tensor, bbox):
+#     device = image_tensor.device
+#     b, _, img_height, img_width = image_tensor.shape
+#     bbox_scaled = bbox * torch.tensor([img_width, img_height, img_width, img_height], device=bbox.device)
+#     bbox_scaled = bbox_scaled.long()
+#     bbox_scaled = bbox_scaled.view(b, 17, 4)
+#     colors = []
+#     for i, boxes in enumerate(bbox_scaled):
+#         for box in boxes:
+#             x1, y1, x2, y2 = box.long()
+#             region = image_tensor[i, :, y1:y2, x1:x2]  # Extract region for each box
+#             peak_colors = []
+#             for channel in range(region.shape[0]):  # Iterate through each color channel
+#                 channel_data = region[channel].reshape(-1).cpu().numpy()
+#                 hist, bin_edges = np.histogram(channel_data, bins=256, range=(0, 1))
+#                 # peak = bin_edges[:-1][hist.argmax()]  # Find the peak bin value 方法1
+#                 peak_index = hist.argmax() ## 方法2
+#                 peak = (bin_edges[peak_index] + bin_edges[peak_index + 1]) / 2  # Calculate bin center 方法2
+#                 peak_colors.append(peak)
+#             colors.append(torch.tensor(peak_colors, dtype=torch.float32, device=device))
+#     return torch.stack(colors).to(device)
+### indcies to words
+def indices_to_words(combined_indices, glove_vocab):
+    words = []
+    for batch in combined_indices:
+        batch_words = []
+        for indices in batch:
+            class_word = glove_vocab[indices[1].item()]  # Class index to word
+            color_word = glove_vocab[indices[0].item()]  # Color index to word
+            batch_words.append(f"{color_word} {class_word}")
+        words.append(batch_words)
+    return words
+### Discrete Position word
 def determine_position(midpoints, image_size=(416, 416)):
     image_width, image_height = image_size
     # Define thresholds for position classification based on the center of the image
@@ -429,39 +534,6 @@ def determine_position(midpoints, image_size=(416, 416)):
         positions.append(position)
 
     return positions
-###一系列提取颜色信息的function
-def unnormalize(tensor, mean, std):
-    """ Reverses the normalization on a tensor. """
-    # Clone the tensor to avoid changing the original
-    newtensor = tensor.clone()
-    for t, m, s in zip(newtensor, mean, std):
-        t.mul_(s).add_(m)
-    return newtensor
-def bbox_midpoint_to_corners(bbox_data):
-    # Convert from midpoint (x, y) and (width, height) to (x1, y1, x2, y2)
-    x_center, y_center, width, height = bbox_data[..., 0], bbox_data[..., 1], bbox_data[..., 2], bbox_data[..., 3]
-    x1 = x_center - width / 2
-    y1 = y_center - height / 2
-    x2 = x_center + width / 2
-    y2 = y_center + height / 2
-    return torch.stack([x1, y1, x2, y2], dim=-1)
-def normalize_coordinates(bbox, image_width, image_height):
-    bbox[..., [0, 2]] = torch.clamp(bbox[..., [0, 2]] / image_width, 0, 1)   # x1, x2
-    bbox[..., [1, 3]] = torch.clamp(bbox[..., [1, 3]] / image_height, 0, 1)  # y1, y2
-    return bbox
-def calculate_average_color(image_tensor, bbox):
-    _, _, img_height, img_width = image_tensor.shape
-    bbox_scaled = bbox * torch.tensor([img_width, img_height, img_width, img_height], device=bbox.device)
-    bbox_scaled = bbox_scaled.long()
-
-    colors = []
-    for box in bbox_scaled:
-        x1, y1, x2, y2 = box
-        region = image_tensor[:, :, y1:y2, x1:x2]
-        average_color = region.reshape(3, -1).mean(dim=1)
-        colors.append(average_color)
-    return torch.stack(colors)
-
 ### position embedding class
 class PositionEmbeddingSine(nn.Module):
     """
@@ -484,7 +556,9 @@ class PositionEmbeddingSine(nn.Module):
         x_embed = positions[:,:,:1]* self.scale
 
         dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=positions.device)
-        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+        dim_t = self.temperature ** (2 * torch.div(dim_t, 2, rounding_mode='floor') / self.num_pos_feats)
+
+        # dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
 
         pos_x = x_embed[:, :, :] / dim_t
         pos_y = y_embed[:, :, :] / dim_t
