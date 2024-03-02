@@ -150,7 +150,30 @@ python test.py --config ./config/[DATASET_NAME].yaml --eval-weights [PATH_TO_CHE
 | ----------------- | ------- | ------ | ------ | -------- | ------ | ------ | -------- |
 |                   | val     | testA  | testB  | val      | testA  | testB  | val-g    |
 | RefCLIP_SimREC    | 63.94   | 64.72  | 61.21  | 42.11    | 44.85  | 38.31  | 48.35    |
-| RefCLIP_TransVG   | 64.86   | 64.89  | 63.87  | incoming |incoming| 36.29  | 45.7     |
+| RefCLIP_TransVG   | 64.86   | 64.89  | 63.87  | incoming |incoming| incoming  | incoming     |
+
+
+## Visualization Prediction Results
+
+Image Description :  "No cut piece but 7am of cut piece"
+
+![vs](assets/vs_0.jpg)
+
+Image Description :  "Green apple on the left"
+
+![vs](assets/vs_1.jpg)
+
+Image Description :  "Purple book"
+
+![vs](assets/vs_2.jpg)
+
+Image Description :  "Yellow round fruit with blemish"
+
+![vs](assets/vs_3.jpg)
+
+Image Description :  "From bottom right second up"
+
+![vs](assets/vs_4.jpg)
 
 
 
