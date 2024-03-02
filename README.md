@@ -86,9 +86,11 @@ wget https://github.com/explosion/spacy-models/releases/download/en_vectors_web_
 pip install en_vectors_web_lg-2.1.0.tar.gz
 ```
 ### Data Preparation
-Download images and Generate annotations according to [SimREC](https://github.com/luogen1996/SimREC/blob/main/DATA_PRE_README.md) (We also prepared the annotations inside the data/anns folder for saving your time)
+Download images and Generate annotations according to [SimREC](https://github.com/luogen1996/SimREC/blob/main/DATA_PRE_README.md) 
+(We also prepared the annotations inside the data/anns folder for saving your time)
 
-Download the pretrained weights of YoloV3 from [Google Drive](https://drive.google.com/file/d/1nxVTx8Zv52VSO-ccHVFe2ggG0HbGnw9g/view?usp=sharing) (We recommend to put it in the main path of APL otherwise, please modify the path in config files)
+Download the pretrained weights of YoloV3 from [Google Drive](https://drive.google.com/file/d/1nxVTx8Zv52VSO-ccHVFe2ggG0HbGnw9g/view?usp=sharing) 
+(We recommend to put it in the main path of APL otherwise, please modify the path in config files)
 
 ## Training 
 
