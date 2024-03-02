@@ -96,6 +96,27 @@ Download the pretrained weights of YoloV3 from [Google Drive](https://drive.goog
 
 (We recommend to put it in the main path of APL otherwise, please modify the path in config files)
 
+The data directory should look like this:
+
+```txt
+├── data
+│   ├── anns            
+│       ├── refcoco.json            
+│       ├── refcoco+.json              
+│       ├── refcocog.json                 
+│       ├── refclef.json
+│       ├── cat_name.json       
+│   ├── images 
+│       ├── train2014
+│           ├── COCO_train2014_000000515716.jpg              
+│           ├── ...
+│       ├── refclef
+│           ├── 99.jpg              
+│           ├── ...
+
+... the remaining directories    
+```
+
 ## Training 
 
 ```bash
