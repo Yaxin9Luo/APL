@@ -4,6 +4,7 @@
 
 
 This repo is the official implementation of the paper "APL: Anchor-based Prompt Learning for One-stage Weakly Supervised Referring Expression Comprehension"
+![APL](assets/fig2.png)
 
 ## Project structure
 
