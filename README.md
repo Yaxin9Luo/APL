@@ -61,9 +61,11 @@ conda create -n apl python=3.7 -y
 conda activate apl
 ```
 ### Install the required dependencies:
-Install Pytorch following the [offical installation instructions](https://pytorch.org/get-started/locally/) (We run all our experiments on pytorch 1.11.0 with CUDA 11.3)
+Install Pytorch following the [offical installation instructions](https://pytorch.org/get-started/locally/) 
+(We run all our experiments on pytorch 1.11.0 with CUDA 11.3)
 
-Install apex following the [official installation guide](https://github.com/NVIDIA/apex#quick-start) for more details, or use the following commands we copied from their offical repo
+Install apex following the [official installation guide](https://github.com/NVIDIA/apex#quick-start) for more details.
+(or use the following commands we copied from their offical repo)
 ```bash
 git clone https://github.com/NVIDIA/apex
 cd apex
