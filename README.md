@@ -153,7 +153,7 @@ python test.py --config ./config/[DATASET_NAME].yaml --eval-weights [PATH_TO_CHE
 | RefCLIP_TransVG   | 64.86   | 64.89  | 63.87  | incoming |incoming| incoming  | incoming     |
 
 
-## Visualization Prediction Results
+## Visualization Prediction Results (Blue box is ground truth)
 
 Image Description :  "No cut piece but 7am of cut piece"
 
