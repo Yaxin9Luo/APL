@@ -48,7 +48,7 @@ Instructions on how to clone and set up your repository:
 
 ### Clone this repo :
 
-Clone the repository and navigate to the project directory:
+- Clone the repository and navigate to the project directory:
 
 ```bash
 git clone https://github.com/Yaxin9Luo/APL.git
@@ -61,11 +61,11 @@ conda create -n apl python=3.7 -y
 conda activate apl
 ```
 ### Install the required dependencies:
-Install Pytorch following the [offical installation instructions](https://pytorch.org/get-started/locally/) 
+- Install Pytorch following the [offical installation instructions](https://pytorch.org/get-started/locally/) 
 
 (We run all our experiments on pytorch 1.11.0 with CUDA 11.3)
 
-Install apex following the [official installation guide](https://github.com/NVIDIA/apex#quick-start) for more details.
+- Install apex following the [official installation guide](https://github.com/NVIDIA/apex#quick-start) for more details.
 
 (or use the following commands we copied from their offical repo)
 ```bash
@@ -88,15 +88,15 @@ wget https://github.com/explosion/spacy-models/releases/download/en_vectors_web_
 pip install en_vectors_web_lg-2.1.0.tar.gz
 ```
 ### Data Preparation
-Download images and Generate annotations according to [SimREC](https://github.com/luogen1996/SimREC/blob/main/DATA_PRE_README.md) 
+- Download images and Generate annotations according to [SimREC](https://github.com/luogen1996/SimREC/blob/main/DATA_PRE_README.md) 
 
 (We also prepared the annotations inside the data/anns folder for saving your time)
 
-Download the pretrained weights of YoloV3 from [Google Drive](https://drive.google.com/file/d/1nxVTx8Zv52VSO-ccHVFe2ggG0HbGnw9g/view?usp=sharing) 
+- Download the pretrained weights of YoloV3 from [Google Drive](https://drive.google.com/file/d/1nxVTx8Zv52VSO-ccHVFe2ggG0HbGnw9g/view?usp=sharing) 
 
 (We recommend to put it in the main path of APL otherwise, please modify the path in config files)
 
-The data directory should look like this:
+- The data directory should look like this:
 
 ```txt
 ├── data
@@ -116,6 +116,7 @@ The data directory should look like this:
 
 ... the remaining directories    
 ```
+- NOTE: our YoloV3 is trained on COCO’s training images, excluding those in RefCOCO, RefCOCO+, and RefCOCOg’s validation+testing
 
 ## Training 
 
