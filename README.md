@@ -129,3 +129,27 @@ python train.py --config ./configs/[DATASET_NAME].yaml
 python test.py --config ./config/[DATASET_NAME].yaml --eval-weights [PATH_TO_CHECKPOINT_FILE]
 ```
 
+## Model Zoo
+
+### Weakly REC 
+| Method | RefCOCO | | | RefCOCO+ | | | RefCOCOg |
+| ------ | ------- | ------- | ------- | ------- | ------- | ------- | ------- |
+|        | val     | testA   | testB   | val     | testA   | testB   | val-g   |
+| APL    | 64.51   | 61.91   | 63.57   | 42.70   | 42.84   | 39.80   | 50.22   |
+
+### Weakly RES
+| Method | RefCOCO | | | RefCOCO+ | | | RefCOCOg |
+| ------ | ------- | ------- | ------- | ------- | ------- | ------- | ------- |
+|        | val     | testA   | testB   | val     | testA   | testB   | val-g   |
+| APL    | 55.92   | 54.84   | 55.64   | 34.92   | 34.87   | 35.61   | 40.13   |
+
+### Pesudo Labels to training other models ( Weakly Supervsied Training Schema)
+
+| Method            | RefCOCO |        |        | RefCOCO+ |        |        | RefCOCOg |
+| ----------------- | ------- | ------ | ------ | -------- | ------ | ------ | -------- |
+|                   | val     | testA  | testB  | val      | testA  | testB  | val-g    |
+| RefCLIP_SimREC    | 63.94   | 64.72  | 61.21  | 42.11    | 44.85  | 38.31  | 48.35    |
+| RefCLIP_TransVG   | 64.86   | 64.89  | 63.87  | incoming |incoming| 36.29  | 45.7     |
+
+
+
