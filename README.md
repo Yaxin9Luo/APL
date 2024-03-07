@@ -150,7 +150,7 @@ python test.py --config ./config/[DATASET_NAME].yaml --eval-weights [PATH_TO_CHE
 | ----------------- | ------- | ------ | ------ | -------- | ------ | ------ | -------- |
 |                   | val     | testA  | testB  | val      | testA  | testB  | val-g    |
 | RefCLIP_SimREC    | 63.94   | 64.72  | 61.21  | 42.11    | 44.85  | 38.31  | 48.35    |
-| RefCLIP_TransVG   | 64.86   | 64.89  | 63.87  | incoming |incoming| incoming  | incoming     |
+| RefCLIP_TransVG   | 64.86   | 64.89  | 63.87  | 39.28 |41.08| 36.45  | 46.11     |
 
 
 ## Visualization Prediction Results (Blue box is ground truth)
