@@ -28,11 +28,9 @@ def getContrast(vis_emb, lan_emb, tag_emb):
     return loss,max_sim_vis_emb
 
 def getPrediction(vis_emb, lan_emb, tag_emb):
-    # 计算视觉特征和语言特征之间的相似度
     sim_map_vis = torch.einsum('bkd, byd -> byk', vis_emb, lan_emb)
     sim_map_tag = torch.einsum('bkd, byd -> byk', tag_emb, lan_emb)
     sim_map= sim_map_vis + sim_map_tag
-    # 根据总的相似度分数进行预测
     maxval, v = sim_map.max(dim=2, keepdim=True)
     predictions = torch.zeros_like(sim_map).to(sim_map.device).scatter(2, v.expand(sim_map.shape), 1).bool()
     return predictions
