@@ -87,30 +87,7 @@ class Net(nn.Module):
         # with open('./config/processed_captions.json', 'r') as f:
         #     captions_dict = json.load(f)
         # caption_tensors = process_batch(img_path, captions_dict, token_to_ix) 
-        
-        ######################## Template Prompt ########################
-        tag_feature,position_embedding = process_yolov3_output(boxes_sml_new[0],x) #[64,17,2], [64,17,512]
-        
-        # tag_feature = caption_tensors.to(boxes_sml[0].device) # BLiP caption
-        bssize,num_anchor,ft = tag_feature.shape
-        tag_feature = tag_feature.view(bssize*num_anchor, ft) #[64*17,15]
-        tag_emb = self.tag_encoder(tag_feature) #[64*17,512]
-        ############ if use BLiP caption, add pos_embed here ############
-        # pos_encoder = PositionEmbeddingSine()
-        # image_size = 416.0
-        # bbox = boxes_sml_new[0][..., :2].mean(2)
-        # scaled_bbox = bbox / image_size  # Normalize coordinates to [0, 1]
-        # position_embedding = pos_encoder(scaled_bbox)
-        ###################################################################
-        
-        batchsize, dim, h, w = x_[0].size()
-        i_new = x_[0].view(batchsize, dim, h * w).permute(0, 2, 1)
-        bs, gridnum, ch = i_new.shape
-        i_new = i_new.masked_select(
-            torch.zeros(bs, gridnum).to(i_new.device).scatter(1, indices, 1).
-                bool().unsqueeze(2).expand(bs, gridnum,ch)).contiguous().view(bs, selnum, ch)
-        language_emb = y_['flat_lang_feat'].unsqueeze(1) #[64, 1, 512]
-        tag_emb = tag_emb['flat_lang_feat'].view(bssize,num_anchor,512) #[64, 17, 512]
+     
         language_emb = self.linear_ts(language_emb) #[64,1,512]
         visual_emb = self.linear_vs(i_new) #[64,17,512]
         # Dynamic Weighted Fusion

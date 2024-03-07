@@ -268,31 +268,7 @@ def process_yolov3_output(yolov3_output, image_tensor,device="cuda:0"):
     
     # Convert midpoints and dimensions to corner coordinates
     # Assuming unnormalize image_tensor
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
-    unnormalize_image_tensor = unnormalize(image_tensor, mean, std)
-    bbox_corners = bbox_midpoint_to_corners(bbox_data)
-    # Normalize coordinates to the range of the image dimensions
-    _, _, img_height, img_width = image_tensor.shape
-    normalized_bbox = normalize_coordinates(bbox_corners, img_width, img_height)
-    dominant_colors = torch.abs(calculate_average_color(unnormalize_image_tensor, normalized_bbox))
-    # Flatten the average_colors tensor
-    color_mapping = {
-    (0.0, 0.0, 1.0): "blue",        # Pure Blue
-    (0.5, 0.5, 0.5): "gray",       # Gray (Neutral)
-    (0.0, 1.0, 0.0): "green",      # Pure Green
-    (1.0, 0.0, 0.0): "red",        # Pure Red
-    (1.0, 1.0, 0.0): "yellow",     # Pure Yellow
-    (1.0, 0.5, 0.0): "orange",     # Orange (A mix of Red and Yellow)
-    (0.5, 0.0, 0.5): "purple",     # Purple (A mix of Blue and Red)
-    (0.6, 0.4, 0.2): "brown",      # Brown (A dark, earthy color)
-    (0.0, 0.0, 0.0): "black",      # Black
-    (1.0, 1.0, 1.0): "white",      # White
-    (1.0, 0.75, 0.8): "pink",      # Pink (A light, desaturated Red)
-    (0.5, 0.0, 0.0): "maroon",     # Maroon (A dark Red)
-    (0.0, 1.0, 1.0): "turquoise",  # Turquoise (A blue-green color)
-    }
-    color_mapping = {torch.tensor(rgb).to(dominant_colors.device): color for rgb, color in color_mapping.items()}
+   
 
 
 
